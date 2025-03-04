@@ -3,6 +3,7 @@
 #include <vector>
 #include <algorithm>
 #include <cmath>
+#include <cstdio>
 
 // Define a simple struct to hold the global bin range for each rank.
 struct BinRange {
@@ -29,17 +30,6 @@ inline int get_bin(double x, double y) {
     int bin_x = (int)(x / bin_size);
     int bin_y = (int)(y / bin_size);
     return bin_y * num_bins + bin_x;
-}
-
-// Return true if the given particle is a ghost particle or not
-inline bool is_ghost(double x, double y, int rank) {
-    int bin_index = get_bin(x, y);
-    // Check if this particle's bin is in the bin row right above or right below
-    if ((bin_index >= first_bin_global_ind - num_bins && bin_index < first_bin_global_ind) ||
-        (bin_index <= last_bin_global_ind + num_bins && bin_index > last_bin_global_ind)) {
-        return true;
-    }
-    return false;
 }
 
 inline int get_rank_from_bin(int global_bin, int num_procs) { 
@@ -103,6 +93,12 @@ void init_simulation(particle_t* parts, int num_parts, double size, int rank, in
         }
         rank_bin_ranges[r].first_global_bin_ind = first_bin_row * num_bins;
         rank_bin_ranges[r].last_global_bin_ind  = (last_bin_row + 1) * num_bins - 1;
+
+        // printf("I am rank %d, r = %d, first_global_bin_ind = %d, last_global_bin_ind = %d\n",
+        //    rank,
+        //    r,
+        //    rank_bin_ranges[r].first_global_bin_ind,
+        //    rank_bin_ranges[r].last_global_bin_ind);
     }
 
     // Set the range for the current processor from the data structure.
@@ -113,13 +109,17 @@ void init_simulation(particle_t* parts, int num_parts, double size, int rank, in
     first_ghost_bin_global_ind = std::max(0, first_bin_global_ind - num_bins);
     last_ghost_bin_global_ind  = std::min(num_bins * num_bins - 1, last_bin_global_ind + num_bins);
 
+    printf("I am rank %d, first_ghost_bin_global_ind = %d, last_ghost_bin_global_ind = %d\n", rank, first_ghost_bin_global_ind, last_ghost_bin_global_ind);
+
     // Resize bins to cover all ghost bins.
     bins.resize(last_ghost_bin_global_ind - first_ghost_bin_global_ind + 1);
+
+    printf("I am rank %d, total number of bins = %d\n", rank, bins.size());
 
     // Distribute particles into real and ghost bins.
     for (int i = 0; i < num_parts; i++) {
         int part_bin = get_bin(parts[i].x, parts[i].y);
-        if (part_bin >= first_bin_global_ind - num_bins && part_bin <= last_bin_global_ind + num_bins) {
+        if (part_bin >= first_ghost_bin_global_ind && part_bin <= last_ghost_bin_global_ind) {
             bins[part_bin - first_ghost_bin_global_ind].push_back(i);
         }
     }
@@ -136,7 +136,6 @@ void simulate_one_step(particle_t* parts, int num_parts, double size, int rank, 
         bins[local_bin_ind].push_back(recvbuf);
     }
 
-    // Write this function
     int start_bin_local_ind = first_bin_global_ind - first_ghost_bin_global_ind;
     int last_bin_local_ind = last_bin_global_ind - first_ghost_bin_global_ind;
 
@@ -159,6 +158,8 @@ void simulate_one_step(particle_t* parts, int num_parts, double size, int rank, 
         }
     }
 
+
+    //Function for moving, we might need to send particlest to other
     for (int i = start_bin_local_ind; i < last_bin_local_ind; i++) {
         for (int j = 0; j < bins[i].size(); j++) {
             int particle_index = bins[i][j];
