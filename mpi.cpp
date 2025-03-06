@@ -272,8 +272,8 @@ void simulate_one_step(particle_t* parts, int num_parts, double size, int rank, 
     int prev_rank_recv_count = 0;
     int next_rank_recv_count = 0;
 
-    std::vector<particle_t> prev_rank_recv_particles(prev_rank_recv_count);
-    std::vector<particle_t> next_rank_recv_particles(next_rank_recv_count);
+    std::vector<particle_t> prev_rank_recv_particles;
+    std::vector<particle_t> next_rank_recv_particles;
 
 
     if (rank == 0) {
@@ -288,7 +288,7 @@ void simulate_one_step(particle_t* parts, int num_parts, double size, int rank, 
 
             MPI_Recv(&next_rank_recv_count, 1, MPI_INT, rank + 1, 0, MPI_COMM_WORLD, MPI_STATUS_IGNORE);
 
-            std::vector<particle_t> next_rank_recv_particles(next_rank_recv_count);
+            next_rank_recv_particles.resize(next_rank_recv_count);
             MPI_Recv(next_rank_recv_particles.data(), next_rank_recv_count, PARTICLE, rank + 1, 0,
                     MPI_COMM_WORLD, MPI_STATUS_IGNORE);
         }
@@ -299,6 +299,8 @@ void simulate_one_step(particle_t* parts, int num_parts, double size, int rank, 
         // receive from prev, then send to prev
 
         MPI_Recv(&prev_rank_recv_count, 1, MPI_INT, rank - 1, 0, MPI_COMM_WORLD, MPI_STATUS_IGNORE);
+
+        prev_rank_recv_particles.resize(prev_rank_recv_count);
         MPI_Recv(prev_rank_recv_particles.data(), prev_rank_recv_count, PARTICLE, rank - 1, 0,
                  MPI_COMM_WORLD, MPI_STATUS_IGNORE);
 
@@ -310,6 +312,8 @@ void simulate_one_step(particle_t* parts, int num_parts, double size, int rank, 
 
         if (rank < num_processors - 1) {
             MPI_Recv(&next_rank_recv_count, 1, MPI_INT, rank + 1, 0, MPI_COMM_WORLD, MPI_STATUS_IGNORE);
+            
+            next_rank_recv_particles.resize(next_rank_recv_count);
             MPI_Recv(next_rank_recv_particles.data(), next_rank_recv_count, PARTICLE, rank + 1, 0,
                     MPI_COMM_WORLD, MPI_STATUS_IGNORE);
 
