@@ -41,17 +41,17 @@ inline int get_bin(double x, double y) {
     return bin_y * num_bins + bin_x;
 }
 
-inline int get_rank_from_bin(int global_bin) {
-    int bin_row = global_bin / num_bins;
-    int bins_rows_per_proc = num_bins / num_processors;
-    int remainder_bin_rows = num_bins % num_processors;
-    if (bin_row < (bins_rows_per_proc + 1) * remainder_bin_rows) {
-        return bin_row / (bins_rows_per_proc + 1);
-    } else {
-        return remainder_bin_rows +
-               (bin_row - (bins_rows_per_proc + 1) * remainder_bin_rows) / bins_rows_per_proc;
-    }
-}
+// inline int get_rank_from_bin(int global_bin) {
+//     int bin_row = global_bin / num_bins;
+//     int bins_rows_per_proc = num_bins / num_processors;
+//     int remainder_bin_rows = num_bins % num_processors;
+//     if (bin_row < (bins_rows_per_proc + 1) * remainder_bin_rows) {
+//         return bin_row / (bins_rows_per_proc + 1);
+//     } else {
+//         return remainder_bin_rows +
+//                (bin_row - (bins_rows_per_proc + 1) * remainder_bin_rows) / bins_rows_per_proc;
+//     }
+// }
 
 // Apply the force from neighbor to particle
 void apply_force(double& particle_ax, double& particle_ay, const particle_t& particle,
@@ -82,6 +82,8 @@ void move(particle_t& p, double size) {
         p.y = p.y < 0 ? -p.y : 2 * size - p.y;
         p.vy = -p.vy;
     }
+    p.ax = 0;
+    p.ay = 0;
 }
 
 // does not include ghost bins
@@ -89,13 +91,6 @@ BinRange get_rank_bin_range(int rank) {
     int num_rows = std::ceil(global_size / bin_size);
     int rows_per_proc = num_rows / num_processors;
     int remainder_rows = num_rows % num_processors;
-
-    // std::cout << "get_rank_bin_range: I am rank " << rank << std::endl;
-    // std::cout << "num_rows = " << num_rows << std::endl;
-    // std::cout << "rows_per_proc = " << rows_per_proc << std::endl;
-    // std::cout << "remainder_rows = " << remainder_rows << std::endl;
-
-    // split out the remainder rows over the first few processors
 
     int first_row = rank * rows_per_proc + std::min(rank, remainder_rows);
     int last_row = first_row + rows_per_proc - 1;
@@ -113,20 +108,10 @@ void bin_particles(int rank, particle_t* parts, int num_parts) {
 
     for (int i = 0; i < num_parts; i++) {
         int part_bin = get_bin(parts[i].x, parts[i].y);
+        int local_bin_idx = part_bin - bin_range.ghost_first;
 
-        // ghost bins above. this ignores the first row since the bin indices will be negative, so
-        // no part_bin will be less than first_rank_bin
-        if (part_bin >= bin_range.ghost_first && part_bin < bin_range.rank_first) {
-            bins.at(part_bin - bin_range.ghost_first).push_back(i);
-        }
-        // this rank's bins
-        else if (part_bin >= bin_range.rank_first && part_bin <= bin_range.rank_last) {
-            bins.at(part_bin - bin_range.ghost_first).push_back(i);
-        }
-        // ghost bins below. this ignores the last row since the bin indices will be out of bounds,
-        // so no part_bin will be greater than last ghost bin
-        else if (part_bin > bin_range.rank_last && part_bin <= bin_range.ghost_last) {
-            bins.at(part_bin - bin_range.ghost_first).push_back(i);
+        if (0 <= local_bin_idx && local_bin_idx < bins.size()) {
+            bins[local_bin_idx].push_back(parts[i].id - 1);
         }
     }
 }
@@ -139,12 +124,7 @@ void init_simulation(particle_t* parts, int num_parts, double size, int rank, in
 
     global_size = size;
     num_bins = std::ceil(size / bin_size);
-
     num_processors = num_procs;
-
-    // Compute how many bin rows each processor gets.
-    int bins_rows_per_proc = num_bins / num_procs;
-    int remainder_bin_rows = num_bins % num_procs;
 
     // Set the range for the current processor from the data structure.
     BinRange rank_bin_range = get_rank_bin_range(rank);
@@ -196,29 +176,26 @@ void simulate_one_step(particle_t* parts, int num_parts, double size, int rank, 
     // num_bins)) (subtract off the top-left corner)
 
     BinRange rank_bin_range = get_rank_bin_range(rank);
-    int ghost_bin_offset = num_bins;
-    int num_rank_bins = rank_bin_range.rank_last - rank_bin_range.rank_first + 1;
+    int local_bin_start = rank_bin_range.rank_first - rank_bin_range.ghost_first;
+    int local_bin_end = rank_bin_range.rank_last - rank_bin_range.ghost_first;
 
-    for (int curr_bin = ghost_bin_offset; curr_bin < ghost_bin_offset + num_rank_bins; curr_bin++) {
-        int bin_y = curr_bin / num_bins;
-        int bin_x = curr_bin % num_bins;
+    // Loop over all local bins
+    for (int curr_bin = local_bin_start; curr_bin <= local_bin_end; curr_bin++) {
+        int local_bin_y = curr_bin / num_bins;
+        int local_bin_x = curr_bin % num_bins;
 
-        int y_start = std::max(0, bin_y - 1);
-        int y_end = std::min(num_bins - 1, bin_y + 1);
-        int x_start = std::max(0, bin_x - 1);
-        int x_end = std::min(num_bins - 1, bin_x + 1);
+        int y_start = local_bin_y - 1;
+        int y_end = local_bin_y + 1;
+        int x_start = std::max(0, local_bin_x - 1);
+        int x_end = std::min(num_bins - 1, local_bin_x + 1);
 
         for (int p_i : bins.at(curr_bin)) {
             for (int neighbor_y = y_start; neighbor_y <= y_end; neighbor_y++) {
                 for (int neighbor_x = x_start; neighbor_x <= x_end; neighbor_x++) {
                     int curr_neighbor_bin = neighbor_y * num_bins + neighbor_x;
-                    // skip over invalid local bins
-                    if (curr_neighbor_bin >= 0 && curr_neighbor_bin < bins.size()) {
-                        // std::cout << curr_neighbor_bin << std::endl;
-                        for (int p_j : bins.at(curr_neighbor_bin)) {
-                            if (p_i != p_j) {
-                                apply_force(parts[p_i].ax, parts[p_i].ay, parts[p_i], parts[p_j]);
-                            }
+                    for (int p_j : bins.at(curr_neighbor_bin)) {
+                        if (p_i != p_j) {
+                            apply_force(parts[p_i].ax, parts[p_i].ay, parts[p_i], parts[p_j]);
                         }
                     }
                 }
@@ -239,27 +216,25 @@ void simulate_one_step(particle_t* parts, int num_parts, double size, int rank, 
     // std::cout << "Moving particles" << std::endl;
 
     // only move particles that are in this rank's bins, don't move ghost particles
-    for (int i = ghost_bin_offset; i < ghost_bin_offset + num_rank_bins; i++) {
-        // std::cout << i << std::endl;
-        for (auto particle_index : bins.at(i)) {
-            // std::cout << i << " " << particle_index << std::endl;
-            move(parts[particle_index], size);
+    for (int curr_bin = local_bin_start; curr_bin <= local_bin_end; curr_bin++) {
+        for (auto p_i : bins.at(curr_bin)) {
+            move(parts[p_i], size);
 
-            int new_bin = get_bin(parts[particle_index].x, parts[particle_index].y);
+            int new_bin = get_bin(parts[p_i].x, parts[p_i].y);
             // ghost row above and also the first row of this rank
             if (rank_bin_range.ghost_first <= new_bin &&
                 new_bin <= rank_bin_range.rank_first + num_bins - 1) {
-                prev_rank_send_particles.push_back(parts[particle_index]);
+                prev_rank_send_particles.push_back(parts[p_i]);
             // last row of this rank and also the ghost row below
             } else if (rank_bin_range.rank_last - num_bins + 1 <= new_bin &&
                        new_bin <= rank_bin_range.ghost_last) {
-                next_rank_send_particles.push_back(parts[particle_index]);
+                next_rank_send_particles.push_back(parts[p_i]);
             }
 
             int new_bin_local_ind = new_bin - rank_bin_range.ghost_first;
             // If the particle remains in this rank's rowspan, then it needs to be rebinned
             if (new_bin_local_ind >= 0 && new_bin_local_ind < bins.size()) {
-                local_particles.push_back(parts[particle_index]);
+                local_particles.push_back(parts[p_i]);
             }
         }
     }
@@ -328,8 +303,8 @@ void simulate_one_step(particle_t* parts, int num_parts, double size, int rank, 
 
 
     // clear bins
-    for (int i = ghost_bin_offset; i < ghost_bin_offset + num_rank_bins; i++) {
-        bins.at(i).clear();
+    for (std::vector<int>& bin : bins) {
+        bin.clear();
     }
 
     std::cout << "rank " << rank << " binning " << prev_rank_recv_particles.size() << " particles from prev rank" << std::endl;
