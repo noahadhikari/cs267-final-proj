@@ -1,29 +1,37 @@
 #include "common.h"
-#include <mpi.h>
-#include <vector>
 #include <algorithm>
 #include <cmath>
 #include <cstdio>
+#include <mpi.h>
+#include <vector>
 
-// Define a simple struct to hold the global bin range for each rank.
-struct BinRange {
-    int first_global_bin_ind;
-    int last_global_bin_ind;
-};
 
 // Global vector storing the bin ranges for all ranks.
-static std::vector<BinRange> rank_bin_ranges;
+// static std::vector<BinRange> rank_bin_ranges;
 
+static double global_size;
 static double bin_size;
 static int num_bins;
+static int num_processors;
 
-static int first_bin_global_ind; // first bin index for current processor (not including ghost bins)
-static int last_bin_global_ind;  // last bin index for current processor
+// Define a simple struct to hold the global bin range for each rank.
+// this bin range is inclusive.
+// out-of-bounds bins are ok - we will just not have any particles in those bins when distributing,
+// make sure to handle this when iterating over the bins, check if indices are valid
+struct BinRange {
 
-static int first_ghost_bin_global_ind;
-static int last_ghost_bin_global_ind;
+    // constructor
+    BinRange(int f, int l)
+        : ghost_first(f - num_bins), rank_first(f), rank_last(l), ghost_last(l + num_bins) {}
 
-static std::vector<std::vector<int>> bins; // a list of bins, where each bin is a list of the particle indices
+    int ghost_first;
+    int rank_first;
+    int rank_last;
+    int ghost_last;
+};
+
+static std::vector<std::vector<int>>
+    bins; // a list of bins, where each bin is a list of the particle indices
 
 // Get bin given the particle's x and y coordinates
 inline int get_bin(double x, double y) {
@@ -32,20 +40,21 @@ inline int get_bin(double x, double y) {
     return bin_y * num_bins + bin_x;
 }
 
-inline int get_rank_from_bin(int global_bin, int num_procs) { 
+inline int get_rank_from_bin(int global_bin) {
     int bin_row = global_bin / num_bins;
-    int bins_rows_per_proc = num_bins / num_procs;
-    int remainder_bin_rows = num_bins % num_procs;
+    int bins_rows_per_proc = num_bins / num_processors;
+    int remainder_bin_rows = num_bins % num_processors;
     if (bin_row < (bins_rows_per_proc + 1) * remainder_bin_rows) {
         return bin_row / (bins_rows_per_proc + 1);
     } else {
         return remainder_bin_rows +
-            (bin_row - (bins_rows_per_proc + 1) * remainder_bin_rows) / bins_rows_per_proc;
+               (bin_row - (bins_rows_per_proc + 1) * remainder_bin_rows) / bins_rows_per_proc;
     }
 }
 
 // Apply the force from neighbor to particle
-void apply_force(double& particle_ax, double& particle_ay, const particle_t& particle, const particle_t& neighbor) {
+void apply_force(double& particle_ax, double& particle_ay, const particle_t& particle,
+                 const particle_t& neighbor) {
     double dx = neighbor.x - particle.x;
     double dy = neighbor.y - particle.y;
     double r2 = dx * dx + dy * dy;
@@ -74,83 +83,124 @@ void move(particle_t& p, double size) {
     }
 }
 
+// does not include ghost bins
+BinRange get_rank_bin_range(int rank) {
+    int num_rows = std::ceil(global_size / bin_size);
+    int rows_per_proc = num_rows / num_processors;
+    int remainder_rows = num_rows % num_processors;
+
+    // split out the remainder rows over the first few processors
+
+    int first_row = rank * rows_per_proc + std::min(rank, remainder_rows);
+    int last_row = first_row + rows_per_proc - 1;
+
+    if (rank < remainder_rows) {
+        last_row++;
+    }
+
+    return BinRange(first_row * num_bins, (last_row + 1) * num_bins - 1);
+}
+
+// Distribute particles into real and ghost bins.
+void bin_particles(int rank, particle_t* parts, int num_parts) {
+    BinRange bin_range = get_rank_bin_range(rank);
+
+    for (int i = 0; i < num_parts; i++) {
+        int part_bin = get_bin(parts[i].x, parts[i].y);
+
+        // ghost bins above. this ignores the first row since the bin indices will be negative, so
+        // no part_bin will be less than first_rank_bin
+        if (part_bin >= bin_range.ghost_first && part_bin < bin_range.rank_first) {
+            bins[part_bin - bin_range.ghost_first].push_back(i);
+        }
+        // this rank's bins
+        else if (part_bin >= bin_range.rank_first && part_bin <= bin_range.rank_last) {
+            bins[part_bin - bin_range.ghost_first].push_back(i);
+        }
+        // ghost bins below. this ignores the last row since the bin indices will be out of bounds,
+        // so no part_bin will be greater than last ghost bin
+        else if (part_bin > bin_range.rank_last && part_bin <= bin_range.ghost_last) {
+            bins[part_bin - bin_range.ghost_first].push_back(i);
+        }
+    }
+}
+
 void init_simulation(particle_t* parts, int num_parts, double size, int rank, int num_procs) {
     // Set bin size and compute number of bins per side
-    bin_size = cutoff + 1e-5;
+
+    global_size = size;
     num_bins = std::ceil(size / bin_size);
+
+    num_processors = num_procs;
 
     // Compute how many bin rows each processor gets.
     int bins_rows_per_proc = num_bins / num_procs;
     int remainder_bin_rows = num_bins % num_procs;
 
-    // Create a vector to store the bin range for each rank.
-    rank_bin_ranges.resize(num_procs);
-    for (int r = 0; r < num_procs; r++) {
-        int first_bin_row = r * bins_rows_per_proc + std::min(r, remainder_bin_rows);
-        int last_bin_row = first_bin_row + bins_rows_per_proc - 1;
-        if (r < remainder_bin_rows) {
-            last_bin_row++;  // Extra row for first few ranks.
-        }
-        rank_bin_ranges[r].first_global_bin_ind = first_bin_row * num_bins;
-        rank_bin_ranges[r].last_global_bin_ind  = (last_bin_row + 1) * num_bins - 1;
-
-        // printf("I am rank %d, r = %d, first_global_bin_ind = %d, last_global_bin_ind = %d\n",
-        //    rank,
-        //    r,
-        //    rank_bin_ranges[r].first_global_bin_ind,
-        //    rank_bin_ranges[r].last_global_bin_ind);
-    }
-
     // Set the range for the current processor from the data structure.
-    first_bin_global_ind = rank_bin_ranges[rank].first_global_bin_ind;
-    last_bin_global_ind = rank_bin_ranges[rank].last_global_bin_ind;
+    BinRange rank_bin_range = get_rank_bin_range(rank);
+    int first_bin = rank_bin_range.rank_first;
+    int last_bin = rank_bin_range.rank_last;
 
-    // Calculate ghost bin indices.
-    first_ghost_bin_global_ind = std::max(0, first_bin_global_ind - num_bins);
-    last_ghost_bin_global_ind  = std::min(num_bins * num_bins - 1, last_bin_global_ind + num_bins);
+    // Calculate ghost bin indices. Out of bounds is ok - we will just not have any particles in
+    // those bins when distributing
+    int first_ghost_bin = rank_bin_range.ghost_first;
+    int last_ghost_bin = rank_bin_range.ghost_last;
 
-    printf("I am rank %d, first_ghost_bin_global_ind = %d, last_ghost_bin_global_ind = %d\n", rank, first_ghost_bin_global_ind, last_ghost_bin_global_ind);
+    printf("I am rank %d, first_ghost_bin = %d, last_ghost_bin = %d\n", rank, first_ghost_bin,
+           last_ghost_bin);
 
-    // Resize bins to cover all ghost bins.
-    bins.resize(last_ghost_bin_global_ind - first_ghost_bin_global_ind + 1);
+    // Resize bins to cover ghost bins above, my bins, ghost bins below. ok if we have some unused
+    // bins in the first/last rows
+    bins.resize(last_ghost_bin - first_ghost_bin + 1);
 
     printf("I am rank %d, total number of bins = %d\n", rank, bins.size());
 
     // Distribute particles into real and ghost bins.
-    for (int i = 0; i < num_parts; i++) {
-        int part_bin = get_bin(parts[i].x, parts[i].y);
-        if (part_bin >= first_ghost_bin_global_ind && part_bin <= last_ghost_bin_global_ind) {
-            bins[part_bin - first_ghost_bin_global_ind].push_back(i);
-        }
-    }
+    bin_particles(rank, parts, num_parts);
 }
 
 void simulate_one_step(particle_t* parts, int num_parts, double size, int rank, int num_procs) {
-    int recvbuf;
+    /*
+    Apply force
+    Move
+    Send full particles that were originally in this row to relevant neighbors
+    recieve full particles and reset the bins
+    */
 
-    //assume we can only receive particles from adjacent processors
-    for (int n = std::max(0, rank - 1); n <= std::min(rank + 1, num_procs - 1); n++) {
-        MPI_Recv(&recvbuf, 1, MPI_INT, n, 0, MPI_COMM_WORLD, MPI_STATUS_IGNORE);
-        int global_bin = get_bin(parts[recvbuf].x, parts[recvbuf].y);
-        int local_bin_ind = global_bin - first_ghost_bin_global_ind;
-        bins[local_bin_ind].push_back(recvbuf);
-    }
+    // num_bins = 3
 
-    int start_bin_local_ind = first_bin_global_ind - first_ghost_bin_global_ind;
-    int last_bin_local_ind = last_bin_global_ind - first_ghost_bin_global_ind;
+    // processor 1
+    // 0 1 2 <-- (first - num_bins, first - 1)
+    // 3 4 5 <-- current rank bins, get_rank_bin_range(rank) = (3, 5) = (first, last)
+    // 6 7 8 <-- (last + 1, last + num_bins)
 
-    for (int i = start_bin_local_ind; i < last_bin_local_ind; i++) {
-        int curr_bin = i;
-        for (int p_i: bins[curr_bin]) {
-            for (int y_offset = -1; y_offset < 2; y_offset++) {
-                for (int x_offset = -1; x_offset < 2; x_offset++) {
-                    int curr_neighbor_bin = i + num_bins * y_offset + x_offset;
-                    if (curr_neighbor_bin < 0 || curr_neighbor_bin >= num_bins * num_bins) {
-                        continue;
-                    }
-                    for (int p_j: bins[curr_neighbor_bin]) {
-                        if (p_i != p_j) {
-                            apply_force(parts[p_i].ax, parts[p_i].ay, parts[p_i], parts[p_j]);
+    // processor 1 bins: [0 1 2 3 4 5 6 7 8]
+
+    // processor 2:
+    // 3 4 5
+    // 6 7 8
+    // 9 10 11
+
+    // processor 2 bins: [0 1 2 3 4 5 6 7 8]
+    // to get the local bin corresponding to a global particle bin, take (part_bin - (first -
+    // num_bins)) (subtract off the top-left corner)
+
+    BinRange rank_bin_range = get_rank_bin_range(rank);
+    int ghost_bin_offset = num_bins;
+    int num_rank_bins = rank_bin_range.rank_last - rank_bin_range.rank_first;
+
+    for (int curr_bin = ghost_bin_offset; curr_bin < ghost_bin_offset + num_rank_bins; curr_bin++) {
+        for (int p_i : bins[curr_bin]) {
+            for (int y_offset = -1; y_offset <= 1; y_offset++) {
+                for (int x_offset = -1; x_offset <= 1; x_offset++) {
+                    int curr_neighbor_bin = curr_bin + num_bins * y_offset + x_offset;
+                    // skip over invalid bins
+                    if (curr_neighbor_bin >= 0 && curr_neighbor_bin < bins.size()) {
+                        for (int p_j : bins[curr_neighbor_bin]) {
+                            if (p_i != p_j) {
+                                apply_force(parts[p_i].ax, parts[p_i].ay, parts[p_i], parts[p_j]);
+                            }
                         }
                     }
                 }
@@ -158,43 +208,95 @@ void simulate_one_step(particle_t* parts, int num_parts, double size, int rank, 
         }
     }
 
+    /*
+    Move particles and keep track of which particles need to be sent where
 
-    //Function for moving, we might need to send particlest to other
-    for (int i = start_bin_local_ind; i < last_bin_local_ind; i++) {
+    Each rank needs to know from its neighbors which particles moved into its region
+    and it also needs to know which particles are in the ghost regions
+    */
+    std::vector<particle_t> prev_rank_send_particles;
+    std::vector<particle_t> next_rank_send_particles;
+    std::vector<particle_t> local_particles;
+    // only move particles that are in this rank's bins, don't move ghost particles
+    for (int i = ghost_bin_offset; i < ghost_bin_offset + num_rank_bins; i++) {
         for (int j = 0; j < bins[i].size(); j++) {
             int particle_index = bins[i][j];
             move(parts[particle_index], size);
+
             int new_bin = get_bin(parts[particle_index].x, parts[particle_index].y);
-            int new_bin_local_ind = new_bin - first_ghost_bin_global_ind;
+            // ghost row above and also the first row of this rank
+            if (rank_bin_range.ghost_first <= new_bin &&
+                new_bin <= rank_bin_range.rank_first + num_bins - 1) {
+                prev_rank_send_particles.push_back(parts[particle_index]);
+                // last row of this rank and also the ghost row below
+            } else if (rank_bin_range.rank_last - num_bins + 1 <= new_bin &&
+                       new_bin <= rank_bin_range.ghost_last) {
+                next_rank_send_particles.push_back(parts[particle_index]);
+            }
 
+            int new_bin_local_ind = new_bin - rank_bin_range.ghost_first;
+            // If the particle remains in this rank's rowspan, then it needs to be rebinned
             if (new_bin_local_ind >= 0 && new_bin_local_ind < bins.size()) {
-                if (new_bin_local_ind != i) {
-                    //remove bins[i][j] from bins[i] and move it to bins[new_bin_local_ind]
-                    bins[new_bin_local_ind].push_back(particle_index);
-                
-                    // Remove the particle index from the current bin
-                    bins[i].erase(bins[i].begin() + j);
-                }
-
-
-            } else {
-                //get the global bin (new_bin)
-                int new_rank = get_rank_from_bin(new_bin, num_procs);
-
-                int sendbuf = particle_index; //sending the particle index
-                MPI_Send(&sendbuf, 1, MPI_INT, new_rank, 0, MPI_COMM_WORLD);
-
-                if (new_rank > 0 && new_bin < rank_bin_ranges[new_rank].first_global_bin_ind + num_bins) {
-                    MPI_Send(&sendbuf, 1, MPI_INT, new_rank - 1, 0, MPI_COMM_WORLD);
-                } else if (new_rank < num_procs - 1 && new_bin > rank_bin_ranges[new_rank].last_global_bin_ind - num_bins) {
-                    MPI_Send(&sendbuf, 1, MPI_INT, new_rank + 1, 0, MPI_COMM_WORLD);
-                }
-
-                bins[i].erase(bins[i].begin() + j);
+                local_particles.push_back(parts[particle_index]);
             }
         }
     }
 
+    // rank 0 sends first then receives, everything else receives first then sends
+
+    int prev_rank_send_count = prev_rank_send_particles.size();
+    int next_rank_send_count = next_rank_send_particles.size();
+
+    int prev_rank_recv_count = 0;
+    int next_rank_recv_count = 0;
+
+    std::vector<particle_t> prev_rank_recv_particles(prev_rank_recv_count);
+    std::vector<particle_t> next_rank_recv_particles(next_rank_recv_count);
+
+    if (rank == 0) {
+        // rank 0 doesn't have any prev rank
+
+        // rank 0 sends first, then receives
+
+        MPI_Send(&next_rank_send_count, 1, MPI_INT, rank + 1, 0, MPI_COMM_WORLD);
+        MPI_Send(next_rank_send_particles.data(), next_rank_send_count, PARTICLE, rank + 1, 0,
+                 MPI_COMM_WORLD);
+
+        MPI_Recv(&next_rank_recv_count, 1, MPI_INT, rank + 1, 0, MPI_COMM_WORLD, MPI_STATUS_IGNORE);
+
+        std::vector<particle_t> next_rank_recv_particles(next_rank_recv_count);
+        MPI_Recv(next_rank_recv_particles.data(), next_rank_recv_count, PARTICLE, rank + 1, 0,
+                 MPI_COMM_WORLD, MPI_STATUS_IGNORE);
+
+    } else {
+        // every other rank receives first, then sends
+
+        // receive from prev, then send to prev
+
+        MPI_Recv(&prev_rank_recv_count, 1, MPI_INT, rank - 1, 0, MPI_COMM_WORLD, MPI_STATUS_IGNORE);
+        MPI_Recv(prev_rank_recv_particles.data(), prev_rank_recv_count, PARTICLE, rank - 1, 0,
+                 MPI_COMM_WORLD, MPI_STATUS_IGNORE);
+
+        MPI_Send(&prev_rank_send_count, 1, MPI_INT, rank - 1, 0, MPI_COMM_WORLD);
+        MPI_Send(prev_rank_send_particles.data(), prev_rank_send_count, PARTICLE, rank - 1, 0,
+                 MPI_COMM_WORLD);
+
+        // receive from next, then send to next. the last processor doesn't have a next rank
+
+        if (rank < num_processors - 1) {
+            MPI_Recv(&next_rank_recv_count, 1, MPI_INT, rank + 1, 0, MPI_COMM_WORLD, MPI_STATUS_IGNORE);
+            MPI_Recv(next_rank_recv_particles.data(), next_rank_recv_count, PARTICLE, rank + 1, 0,
+                    MPI_COMM_WORLD, MPI_STATUS_IGNORE);
+
+            MPI_Send(&next_rank_send_count, 1, MPI_INT, rank + 1, 0, MPI_COMM_WORLD);
+            MPI_Send(next_rank_send_particles.data(), next_rank_send_count, PARTICLE, rank + 1, 0,
+                    MPI_COMM_WORLD);
+        }
+    }
+
+    bin_particles(rank, prev_rank_recv_particles.data(), prev_rank_recv_particles.size());
+    bin_particles(rank, local_particles.data(), local_particles.size());
+    bin_particles(rank, next_rank_recv_particles.data(), next_rank_recv_particles.size());
 }
 
 void gather_for_save(particle_t* parts, int num_parts, double size, int rank, int num_procs) {
@@ -202,17 +304,21 @@ void gather_for_save(particle_t* parts, int num_parts, double size, int rank, in
     // processor has an in-order view of all particles. That is, the array
     // parts is complete and sorted by particle id.
 
-    //First do a Gather to get particle counts
+    // First do a Gather to get particle counts
 
-    //Then do Gatherv
-    
+    // Then do Gatherv
+
     // Build a local vector of particles owned by this rank.
-    // Here we assume that if a particle's bin (computed from its x and y) falls 
+    // Here we assume that if a particle's bin (computed from its x and y) falls
     // in [first_bin_global_ind, last_bin_global_ind], then this rank owns it.
     std::vector<particle_t> local_particles;
+
+    BinRange rank_bin_range = get_rank_bin_range(rank);
+
+    // TODO: Maybe just loop over the local bins
     for (int i = 0; i < num_parts; i++) {
         int part_bin = get_bin(parts[i].x, parts[i].y);
-        if (part_bin >= first_bin_global_ind && part_bin <= last_bin_global_ind) {
+        if (part_bin >= rank_bin_range.rank_first && part_bin <= rank_bin_range.rank_last) {
             local_particles.push_back(parts[i]);
         }
     }
@@ -223,8 +329,9 @@ void gather_for_save(particle_t* parts, int num_parts, double size, int rank, in
     if (rank == 0) {
         counts.resize(num_procs);
     }
-    
-    MPI_Gather(&local_count, 1, MPI_INT, rank == 0 ? counts.data() : nullptr, 1, MPI_INT, 0, MPI_COMM_WORLD);
+
+    MPI_Gather(&local_count, 1, MPI_INT, rank == 0 ? counts.data() : nullptr, 1, MPI_INT, 0,
+               MPI_COMM_WORLD);
 
     // Compute displacements on rank 0.
     std::vector<int> displs;
@@ -246,17 +353,18 @@ void gather_for_save(particle_t* parts, int num_parts, double size, int rank, in
     }
 
     // Gather the particles using MPI_Gatherv.
-    MPI_Gatherv(local_particles.data(), local_count, PARTICLE, rank == 0 ? gathered.data() : nullptr, rank == 0 ? counts.data() : nullptr, rank == 0 ? displs.data() : nullptr, PARTICLE, 0, MPI_COMM_WORLD);
+    MPI_Gatherv(local_particles.data(), local_count, PARTICLE,
+                rank == 0 ? gathered.data() : nullptr, rank == 0 ? counts.data() : nullptr,
+                rank == 0 ? displs.data() : nullptr, PARTICLE, 0, MPI_COMM_WORLD);
 
     // On rank 0, sort the gathered particles by particle id.
     if (rank == 0) {
         std::sort(gathered.begin(), gathered.end(),
-                  [](const particle_t& a, const particle_t& b) {
-                      return a.id < b.id;
-                  });
+                  [](const particle_t& a, const particle_t& b) { return a.id < b.id; });
         // Copy the sorted particles back into the parts array.
         for (int i = 0; i < total_count; i++) {
             parts[i] = gathered[i];
         }
     }
 }
+
