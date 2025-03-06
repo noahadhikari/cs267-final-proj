@@ -4,13 +4,14 @@
 #include <cstdio>
 #include <mpi.h>
 #include <vector>
+#include <iostream>
 
 
 // Global vector storing the bin ranges for all ranks.
 // static std::vector<BinRange> rank_bin_ranges;
 
 static double global_size;
-static double bin_size;
+static double bin_size = cutoff + 1e-5;
 static int num_bins;
 static int num_processors;
 
@@ -89,6 +90,11 @@ BinRange get_rank_bin_range(int rank) {
     int rows_per_proc = num_rows / num_processors;
     int remainder_rows = num_rows % num_processors;
 
+    std::cout << "get_rank_bin_range: I am rank " << rank << std::endl;
+    std::cout << "num_rows = " << num_rows << std::endl;
+    std::cout << "rows_per_proc = " << rows_per_proc << std::endl;
+    std::cout << "remainder_rows = " << remainder_rows << std::endl;
+
     // split out the remainder rows over the first few processors
 
     int first_row = rank * rows_per_proc + std::min(rank, remainder_rows);
@@ -128,6 +134,9 @@ void bin_particles(int rank, particle_t* parts, int num_parts) {
 void init_simulation(particle_t* parts, int num_parts, double size, int rank, int num_procs) {
     // Set bin size and compute number of bins per side
 
+    std::cout << "init_simulation: I am rank " << rank << std::endl;
+    std::cout << "num_procs = " << num_procs << std::endl;
+
     global_size = size;
     num_bins = std::ceil(size / bin_size);
 
@@ -147,14 +156,14 @@ void init_simulation(particle_t* parts, int num_parts, double size, int rank, in
     int first_ghost_bin = rank_bin_range.ghost_first;
     int last_ghost_bin = rank_bin_range.ghost_last;
 
-    printf("I am rank %d, first_ghost_bin = %d, last_ghost_bin = %d\n", rank, first_ghost_bin,
-           last_ghost_bin);
+    std::cout << "I am rank " << rank << ", first_bin = " << first_bin
+              << ", last_bin = " << last_bin << std::endl;
 
     // Resize bins to cover ghost bins above, my bins, ghost bins below. ok if we have some unused
     // bins in the first/last rows
     bins.resize(last_ghost_bin - first_ghost_bin + 1);
 
-    printf("I am rank %d, total number of bins = %d\n", rank, bins.size());
+    std::cout << "I am rank " << rank << ", total number of bins = " << bins.size() << std::endl;
 
     // Distribute particles into real and ghost bins.
     bin_particles(rank, parts, num_parts);
