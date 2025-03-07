@@ -49,7 +49,7 @@ inline int get_bin(double x, double y) {
 }
 
 // Apply the force from neighbor to particle
-void apply_force(double& particle_ax, double& particle_ay, const particle_t& particle,
+inline void apply_force(double& particle_ax, double& particle_ay, const particle_t& particle,
                  const particle_t& neighbor) {
     double dx = neighbor.x - particle.x;
     double dy = neighbor.y - particle.y;
@@ -64,7 +64,7 @@ void apply_force(double& particle_ax, double& particle_ay, const particle_t& par
 }
 
 // Integrate the ODE
-void move(particle_t& p, double size) {
+inline void move(particle_t& p, double size) {
     p.vx += p.ax * dt;
     p.vy += p.ay * dt;
     p.x += p.vx * dt;
