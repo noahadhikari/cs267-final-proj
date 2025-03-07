@@ -29,6 +29,12 @@ struct BinRange {
     int rank_first;
     int rank_last;
     int ghost_last;
+
+    friend std::ostream& operator<<(std::ostream& os, const BinRange& br) {
+        os << "ghost_first: " << br.ghost_first << ", rank_first: " << br.rank_first
+           << ", rank_last: " << br.rank_last << ", ghost_last: " << br.ghost_last;
+        return os;
+    }
 };
 
 static std::vector<std::vector<int>>
@@ -83,9 +89,8 @@ void move(particle_t& p, double size) {
         p.vy = -p.vy;
     }
 
-    // reset accelerations
-    p.ax = 0;
-    p.ay = 0;
+    p.ax = 0.0;
+    p.ay = 0.0;
 }
 
 // does not include ghost bins
@@ -120,13 +125,15 @@ void bin_particles(int rank, particle_t* parts, int num_parts) {
 
 void init_simulation(particle_t* parts, int num_parts, double size, int rank, int num_procs) {
     // Set bin size and compute number of bins per side
+    global_size = size;
+    num_bins = std::ceil(size / bin_size);
+    num_processors = num_procs;
 
     std::cout << "init_simulation: I am rank " << rank << std::endl;
     std::cout << "num_procs = " << num_procs << std::endl;
 
-    global_size = size;
-    num_bins = std::ceil(size / bin_size);
-    num_processors = num_procs;
+    std::cout << "bin range for rank " << rank << ": " << get_rank_bin_range(rank) << std::endl;
+
 
     // Set the range for the current processor from the data structure.
     BinRange rank_bin_range = get_rank_bin_range(rank);
@@ -182,16 +189,16 @@ void simulate_one_step(particle_t* parts, int num_parts, double size, int rank, 
     int local_bin_end = rank_bin_range.rank_last - rank_bin_range.ghost_first;
 
     // Loop over all local bins
-    for (int curr_bin = local_bin_start; curr_bin <= local_bin_end; curr_bin++) {
-        int local_bin_y = curr_bin / num_bins;
-        int local_bin_x = curr_bin % num_bins;
+    for (int local_bin = local_bin_start; local_bin <= local_bin_end; local_bin++) {
+        int local_bin_y = local_bin / num_bins;
+        int local_bin_x = local_bin % num_bins;
 
         int y_start = local_bin_y - 1;
         int y_end = local_bin_y + 1;
         int x_start = std::max(0, local_bin_x - 1);
         int x_end = std::min(num_bins - 1, local_bin_x + 1);
 
-        for (int p_i : bins.at(curr_bin)) {
+        for (int p_i : bins.at(local_bin)) {
             for (int neighbor_y = y_start; neighbor_y <= y_end; neighbor_y++) {
                 for (int neighbor_x = x_start; neighbor_x <= x_end; neighbor_x++) {
                     int curr_neighbor_bin = neighbor_y * num_bins + neighbor_x;
@@ -223,25 +230,33 @@ void simulate_one_step(particle_t* parts, int num_parts, double size, int rank, 
             move(parts[p_i], size);
 
             int new_bin = get_bin(parts[p_i].x, parts[p_i].y);
-            // ghost row above and also the first row of this rank
-            if (rank_bin_range.ghost_first <= new_bin &&
-                new_bin <= rank_bin_range.rank_first + num_bins - 1) {
+            bool flag = false;
+            // rows above and also the first row of this rank
+            // for now, no lower bound since it may jump more than one row, but still probably in the previous processor
+            if (0 <= new_bin && new_bin <= rank_bin_range.rank_first + num_bins - 1) {
                 prev_rank_send_particles.push_back(parts[p_i]);
-            // last row of this rank and also the ghost row below
-            } else if (rank_bin_range.rank_last - num_bins + 1 <= new_bin &&
-                       new_bin <= rank_bin_range.ghost_last) {
+                flag = true;
+            // last row of this rank and also the rows below
+            // for now, no upper bound since it may jump more than one row, but still probably in the next processor
+            } else if (rank_bin_range.rank_last - num_bins + 1 <= new_bin && new_bin <= num_bins * num_bins - 1) {
                 next_rank_send_particles.push_back(parts[p_i]);
+                flag = true;
             }
 
             int new_bin_local_ind = new_bin - rank_bin_range.ghost_first;
             // If the particle remains in this rank's rowspan, then it needs to be rebinned
             if (new_bin_local_ind >= 0 && new_bin_local_ind < bins.size()) {
                 local_particles.push_back(parts[p_i]);
+                flag = true;
+            }
+
+            if (!flag) {
+                std::cout << "Particle " << p_i << " is in an invalid bin" << std::endl;
             }
         }
     }
 
-    // rank 0 sends first then receives, everything else receives first then sends
+    // rank 0 sends first then receives, everything else receives from prev, sends to prev, sends to next, receives from next
 
     int prev_rank_send_count = prev_rank_send_particles.size();
     int next_rank_send_count = next_rank_send_particles.size();
@@ -274,7 +289,7 @@ void simulate_one_step(particle_t* parts, int num_parts, double size, int rank, 
         }
 
     } else {
-        // every other rank receives first, then sends
+        // every other rank receives from prev, sends to prev, sends to next, receives from next
 
         // receive from prev, then send to prev
 
@@ -294,7 +309,7 @@ void simulate_one_step(particle_t* parts, int num_parts, double size, int rank, 
 
         
 
-        // receive from next, then send to next. the last processor doesn't have a next rank
+        // send to next, then receive to next. the last processor doesn't have a next rank
 
         if (rank < num_processors - 1) {
             std::cout << "rank " << rank << " sending " << next_rank_send_count << " particles to rank " << rank + 1 << std::endl;
