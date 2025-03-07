@@ -77,6 +77,8 @@ void move(particle_t& p, double size) {
         p.vy = -p.vy;
     }
 
+
+    // reset accelerations
     p.ax = 0.0;
     p.ay = 0.0;
 }
@@ -148,6 +150,14 @@ void init_simulation(particle_t* parts, int num_parts, double size, int rank, in
 
     // Distribute particles into real and ghost bins.
     bin_particles(rank, parts, num_parts, nullptr);
+}
+
+int count_local_particles(int rank) {
+    int count = 0;
+    for (int i = num_bins; i < bins.size() - num_bins; i++) {
+        count += bins.at(i).size();
+    }
+    return count;
 }
 
 void simulate_one_step(particle_t* parts, int num_parts, double size, int rank, int num_procs) {
@@ -222,27 +232,21 @@ void simulate_one_step(particle_t* parts, int num_parts, double size, int rank, 
             move(parts[p_i], size);
 
             int new_bin = get_bin(parts[p_i].x, parts[p_i].y);
-            bool flag = false;
+
             // rows above and also the first row of this rank
-            // for now, no lower bound since it may jump more than one row, but still probably in the previous processor
+            // no lower bound since it may jump more than one row, but still probably in the previous processor
             if (new_bin <= rank_bin_range.rank_first + num_bins - 1) {
                 prev_rank_send_particles.push_back(parts[p_i]);
-                flag = true;
+
             // last row of this rank and also the rows below
-            // for now, no upper bound since it may jump more than one row, but still probably in the next processor
+            // no upper bound since it may jump more than one row, but still probably in the next processor
             } else if (rank_bin_range.rank_last - num_bins + 1 <= new_bin) {
                 next_rank_send_particles.push_back(parts[p_i]);
-                flag = true;
             }
 
             // If the particle remains in this rank's rowspan, then it needs to be rebinned
             if (rank_bin_range.ghost_first <= new_bin && new_bin <= rank_bin_range.ghost_last) {
                 local_particles.push_back(parts[p_i]);
-                flag = true;
-            }
-
-            if (!flag) {
-                std::cout << "Particle " << p_i << " is in an invalid bin" << std::endl;
             }
         }
     }
@@ -324,14 +328,16 @@ void simulate_one_step(particle_t* parts, int num_parts, double size, int rank, 
         bin.clear();
     }
 
-    std::cout << "rank " << rank << " binning " << prev_rank_recv_particles.size() << " particles from prev rank" << std::endl;
+    // std::cout << "rank " << rank << " binning " << prev_rank_recv_particles.size() << " particles from prev rank" << std::endl;
     bin_particles(rank, prev_rank_recv_particles.data(), prev_rank_recv_particles.size(), parts);
 
-    std::cout << "rank " << rank << " binning " << local_particles.size() << " local particles" << std::endl;
+    // std::cout << "rank " << rank << " binning " << local_particles.size() << " local particles" << std::endl;
     bin_particles(rank, local_particles.data(), local_particles.size(), parts);
 
-    std::cout << "rank " << rank << " binning " << next_rank_recv_particles.size() << " particles from next rank" << std::endl;
+    // std::cout << "rank " << rank << " binning " << next_rank_recv_particles.size() << " particles from next rank" << std::endl;
     bin_particles(rank, next_rank_recv_particles.data(), next_rank_recv_particles.size(), parts);
+
+    std::cout << count_local_particles(rank) << " particles in rank " << rank << std::endl;
 }
 
 void gather_for_save(particle_t* parts, int num_parts, double size, int rank, int num_procs) {
