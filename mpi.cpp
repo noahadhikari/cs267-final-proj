@@ -249,15 +249,14 @@ void simulate_one_step(particle_t* parts, int num_parts, double size, int rank, 
         // rank 0 sends first, then receives
 
         if (num_processors > 1) {
-            MPI_Send(&next_rank_send_count, 1, MPI_INT, rank + 1, 0, MPI_COMM_WORLD);
-            MPI_Send(next_rank_send_particles.data(), next_rank_send_count, PARTICLE, rank + 1, 0,
-                    MPI_COMM_WORLD);
-
-            MPI_Recv(&next_rank_recv_count, 1, MPI_INT, rank + 1, 0, MPI_COMM_WORLD, MPI_STATUS_IGNORE);
-
+            MPI_Sendrecv(&next_rank_send_count, 1, MPI_INT, rank + 1, 0,
+                     &next_rank_recv_count, 1, MPI_INT, rank + 1, 0,
+                     MPI_COMM_WORLD, MPI_STATUS_IGNORE);
             next_rank_recv_particles.resize(next_rank_recv_count);
-            MPI_Recv(next_rank_recv_particles.data(), next_rank_recv_count, PARTICLE, rank + 1, 0,
-                    MPI_COMM_WORLD, MPI_STATUS_IGNORE);
+
+            MPI_Sendrecv(next_rank_send_particles.data(), next_rank_send_count, PARTICLE, rank + 1, 0,
+                     next_rank_recv_particles.data(), next_rank_recv_count, PARTICLE, rank + 1, 0,
+                     MPI_COMM_WORLD, MPI_STATUS_IGNORE);
         }
 
     } else {
@@ -265,30 +264,27 @@ void simulate_one_step(particle_t* parts, int num_parts, double size, int rank, 
 
         // receive from prev, then send to prev
 
-        MPI_Recv(&prev_rank_recv_count, 1, MPI_INT, rank - 1, 0, MPI_COMM_WORLD, MPI_STATUS_IGNORE);
-
-        prev_rank_recv_particles.resize(prev_rank_recv_count);
-        MPI_Recv(prev_rank_recv_particles.data(), prev_rank_recv_count, PARTICLE, rank - 1, 0,
+        MPI_Sendrecv(&prev_rank_send_count, 1, MPI_INT, rank - 1, 0,
+                 &prev_rank_recv_count, 1, MPI_INT, rank - 1, 0,
                  MPI_COMM_WORLD, MPI_STATUS_IGNORE);
 
-        MPI_Send(&prev_rank_send_count, 1, MPI_INT, rank - 1, 0, MPI_COMM_WORLD);
-        MPI_Send(prev_rank_send_particles.data(), prev_rank_send_count, PARTICLE, rank - 1, 0,
-                 MPI_COMM_WORLD);
-
-        
+        prev_rank_recv_particles.resize(prev_rank_recv_count);
+        MPI_Sendrecv(prev_rank_send_particles.data(), prev_rank_send_count, PARTICLE, rank - 1, 0,
+                prev_rank_recv_particles.data(), prev_rank_recv_count, PARTICLE, rank - 1, 0,
+                MPI_COMM_WORLD, MPI_STATUS_IGNORE);
 
         // send to next, then receive to next. the last processor doesn't have a next rank
 
         if (rank < num_processors - 1) {
-            MPI_Send(&next_rank_send_count, 1, MPI_INT, rank + 1, 0, MPI_COMM_WORLD);
-            MPI_Send(next_rank_send_particles.data(), next_rank_send_count, PARTICLE, rank + 1, 0,
-                    MPI_COMM_WORLD);
+            MPI_Sendrecv(&next_rank_send_count, 1, MPI_INT, rank + 1, 0,
+                     &next_rank_recv_count, 1, MPI_INT, rank + 1, 0,
+                     MPI_COMM_WORLD, MPI_STATUS_IGNORE);
 
-            MPI_Recv(&next_rank_recv_count, 1, MPI_INT, rank + 1, 0, MPI_COMM_WORLD, MPI_STATUS_IGNORE);
-            
             next_rank_recv_particles.resize(next_rank_recv_count);
-            MPI_Recv(next_rank_recv_particles.data(), next_rank_recv_count, PARTICLE, rank + 1, 0,
-                    MPI_COMM_WORLD, MPI_STATUS_IGNORE);
+
+            MPI_Sendrecv(next_rank_send_particles.data(), next_rank_send_count, PARTICLE, rank + 1, 0,
+                        next_rank_recv_particles.data(), next_rank_recv_count, PARTICLE, rank + 1, 0,
+                        MPI_COMM_WORLD, MPI_STATUS_IGNORE);
         }
     }
 
@@ -298,7 +294,7 @@ void simulate_one_step(particle_t* parts, int num_parts, double size, int rank, 
 
     bin_particles(rank, prev_rank_recv_particles.data(), prev_rank_recv_particles.size(), parts);
 
-    bin_particles(rank, local_particles.data(), local_particles.size(), parts);
+    bin_particles(rank, local_particles.data(), local_particles.size(), nullptr);
 
     bin_particles(rank, next_rank_recv_particles.data(), next_rank_recv_particles.size(), parts);
 
