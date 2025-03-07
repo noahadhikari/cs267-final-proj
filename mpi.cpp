@@ -10,6 +10,11 @@ static double global_size;
 static double bin_size = cutoff + 1e-5;
 static int num_bins;
 static int num_processors;
+static std::vector<particle_t> prev_rank_recv_particles;
+static std::vector<particle_t> next_rank_recv_particles;
+static std::vector<particle_t> prev_rank_send_particles;
+static std::vector<particle_t> next_rank_send_particles;
+static std::vector<particle_t> local_particles;
 
 // Define a simple struct to hold the global bin range for each rank.
 // this bin range is inclusive.
@@ -197,9 +202,9 @@ void simulate_one_step(particle_t* parts, int num_parts, double size, int rank, 
     Each rank needs to know from its neighbors which particles moved into its region
     and it also needs to know which particles are in the ghost regions
     */
-    std::vector<particle_t> prev_rank_send_particles;
-    std::vector<particle_t> next_rank_send_particles;
-    std::vector<particle_t> local_particles;
+    prev_rank_send_particles.clear();
+    next_rank_send_particles.clear();
+    local_particles.clear();
 
     // only move particles that are in this rank's bins, don't move ghost particles
     for (int curr_bin = local_bin_start; curr_bin <= local_bin_end; curr_bin++) {
@@ -234,8 +239,8 @@ void simulate_one_step(particle_t* parts, int num_parts, double size, int rank, 
     int prev_rank_recv_count = 0;
     int next_rank_recv_count = 0;
 
-    std::vector<particle_t> prev_rank_recv_particles;
-    std::vector<particle_t> next_rank_recv_particles;
+    prev_rank_recv_particles.clear();
+    next_rank_recv_particles.clear();
 
 
     if (rank == 0) {
@@ -297,7 +302,7 @@ void simulate_one_step(particle_t* parts, int num_parts, double size, int rank, 
 
     bin_particles(rank, next_rank_recv_particles.data(), next_rank_recv_particles.size(), parts);
 
-    std::cout << count_local_particles(rank) << " particles in rank " << rank << std::endl;
+    // std::cout << count_local_particles(rank) << " particles in rank " << rank << std::endl;
 }
 
 void gather_for_save(particle_t* parts, int num_parts, double size, int rank, int num_procs) {
@@ -312,17 +317,17 @@ void gather_for_save(particle_t* parts, int num_parts, double size, int rank, in
     // Build a local vector of particles owned by this rank.
     // Here we assume that if a particle's bin (computed from its x and y) falls
     // in [first_bin_global_ind, last_bin_global_ind], then this rank owns it.
-    std::vector<particle_t> local_particles;
+    std::vector<particle_t> curr_rank_particles;
 
     BinRange rank_bin_range = get_rank_bin_range(rank);
 
     for (int i = 0; i < num_parts; i++) {
         int part_bin = get_bin(parts[i].x, parts[i].y);
         if (part_bin >= rank_bin_range.rank_first && part_bin <= rank_bin_range.rank_last) {
-            local_particles.push_back(parts[i]);
+            curr_rank_particles.push_back(parts[i]);
         }
     }
-    int local_count = local_particles.size();
+    int local_count = curr_rank_particles.size();
 
     std::vector<int> counts;
     if (rank == 0) {
@@ -352,7 +357,7 @@ void gather_for_save(particle_t* parts, int num_parts, double size, int rank, in
     }
 
     // Gather the particles using MPI_Gatherv.
-    MPI_Gatherv(local_particles.data(), local_count, PARTICLE,
+    MPI_Gatherv(curr_rank_particles.data(), local_count, PARTICLE,
                 rank == 0 ? gathered.data() : nullptr, rank == 0 ? counts.data() : nullptr,
                 rank == 0 ? displs.data() : nullptr, PARTICLE, 0, MPI_COMM_WORLD);
 
