@@ -82,6 +82,8 @@ void move(particle_t& p, double size) {
         p.y = p.y < 0 ? -p.y : 2 * size - p.y;
         p.vy = -p.vy;
     }
+
+    // reset accelerations
     p.ax = 0;
     p.ay = 0;
 }
@@ -257,6 +259,7 @@ void simulate_one_step(particle_t* parts, int num_parts, double size, int rank, 
         // rank 0 sends first, then receives
 
         if (num_processors > 1) {
+            std::cout << "rank 0 sending " << next_rank_send_count << " particles to rank 1" << std::endl;
             MPI_Send(&next_rank_send_count, 1, MPI_INT, rank + 1, 0, MPI_COMM_WORLD);
             MPI_Send(next_rank_send_particles.data(), next_rank_send_count, PARTICLE, rank + 1, 0,
                     MPI_COMM_WORLD);
@@ -266,6 +269,8 @@ void simulate_one_step(particle_t* parts, int num_parts, double size, int rank, 
             next_rank_recv_particles.resize(next_rank_recv_count);
             MPI_Recv(next_rank_recv_particles.data(), next_rank_recv_count, PARTICLE, rank + 1, 0,
                     MPI_COMM_WORLD, MPI_STATUS_IGNORE);
+
+            std::cout << "rank 0 received " << next_rank_recv_count << " particles from rank 1" << std::endl;
         }
 
     } else {
@@ -279,28 +284,34 @@ void simulate_one_step(particle_t* parts, int num_parts, double size, int rank, 
         MPI_Recv(prev_rank_recv_particles.data(), prev_rank_recv_count, PARTICLE, rank - 1, 0,
                  MPI_COMM_WORLD, MPI_STATUS_IGNORE);
 
+        std::cout << "rank " << rank << " received " << prev_rank_recv_count << " particles from rank " << rank - 1 << std::endl;
+        
+        std::cout << "rank " << rank << " sending " << prev_rank_send_count << " particles to rank " << rank - 1 << std::endl;
+
         MPI_Send(&prev_rank_send_count, 1, MPI_INT, rank - 1, 0, MPI_COMM_WORLD);
         MPI_Send(prev_rank_send_particles.data(), prev_rank_send_count, PARTICLE, rank - 1, 0,
                  MPI_COMM_WORLD);
 
+        
+
         // receive from next, then send to next. the last processor doesn't have a next rank
 
         if (rank < num_processors - 1) {
+            std::cout << "rank " << rank << " sending " << next_rank_send_count << " particles to rank " << rank + 1 << std::endl;
+
+            MPI_Send(&next_rank_send_count, 1, MPI_INT, rank + 1, 0, MPI_COMM_WORLD);
+            MPI_Send(next_rank_send_particles.data(), next_rank_send_count, PARTICLE, rank + 1, 0,
+                    MPI_COMM_WORLD);
+
             MPI_Recv(&next_rank_recv_count, 1, MPI_INT, rank + 1, 0, MPI_COMM_WORLD, MPI_STATUS_IGNORE);
             
             next_rank_recv_particles.resize(next_rank_recv_count);
             MPI_Recv(next_rank_recv_particles.data(), next_rank_recv_count, PARTICLE, rank + 1, 0,
                     MPI_COMM_WORLD, MPI_STATUS_IGNORE);
 
-            MPI_Send(&next_rank_send_count, 1, MPI_INT, rank + 1, 0, MPI_COMM_WORLD);
-            MPI_Send(next_rank_send_particles.data(), next_rank_send_count, PARTICLE, rank + 1, 0,
-                    MPI_COMM_WORLD);
+            std::cout << "rank " << rank << " received " << next_rank_recv_count << " particles from rank " << rank + 1 << std::endl;
         }
     }
-
-    // std::cout << "rank " << rank << " received " << prev_rank_recv_count << " particles from prev rank" << std::endl;
-    // std::cout << "rank " << rank << " received " << next_rank_recv_count << " particles from next rank" << std::endl;
-
 
     // clear bins
     for (std::vector<int>& bin : bins) {
