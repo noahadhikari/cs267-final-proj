@@ -47,18 +47,6 @@ inline int get_bin(double x, double y) {
     return bin_y * num_bins + bin_x;
 }
 
-// inline int get_rank_from_bin(int global_bin) {
-//     int bin_row = global_bin / num_bins;
-//     int bins_rows_per_proc = num_bins / num_processors;
-//     int remainder_bin_rows = num_bins % num_processors;
-//     if (bin_row < (bins_rows_per_proc + 1) * remainder_bin_rows) {
-//         return bin_row / (bins_rows_per_proc + 1);
-//     } else {
-//         return remainder_bin_rows +
-//                (bin_row - (bins_rows_per_proc + 1) * remainder_bin_rows) / bins_rows_per_proc;
-//     }
-// }
-
 // Apply the force from neighbor to particle
 void apply_force(double& particle_ax, double& particle_ay, const particle_t& particle,
                  const particle_t& neighbor) {
@@ -110,7 +98,7 @@ BinRange get_rank_bin_range(int rank) {
 }
 
 // Distribute particles into real and ghost bins.
-void bin_particles(int rank, particle_t* parts, int num_parts) {
+void bin_particles(int rank, particle_t* parts, int num_parts, particle_t* full_parts) {
     BinRange bin_range = get_rank_bin_range(rank);
 
     for (int i = 0; i < num_parts; i++) {
@@ -119,6 +107,10 @@ void bin_particles(int rank, particle_t* parts, int num_parts) {
 
         if (0 <= local_bin_idx && local_bin_idx < bins.size()) {
             bins[local_bin_idx].push_back(parts[i].id - 1);
+        }
+
+        if (full_parts != nullptr) {
+            full_parts[parts[i].id - 1] = parts[i];
         }
     }
 }
@@ -155,7 +147,7 @@ void init_simulation(particle_t* parts, int num_parts, double size, int rank, in
     std::cout << "I am rank " << rank << ", total number of bins = " << bins.size() << std::endl;
 
     // Distribute particles into real and ghost bins.
-    bin_particles(rank, parts, num_parts);
+    bin_particles(rank, parts, num_parts, nullptr);
 }
 
 void simulate_one_step(particle_t* parts, int num_parts, double size, int rank, int num_procs) {
@@ -233,19 +225,18 @@ void simulate_one_step(particle_t* parts, int num_parts, double size, int rank, 
             bool flag = false;
             // rows above and also the first row of this rank
             // for now, no lower bound since it may jump more than one row, but still probably in the previous processor
-            if (0 <= new_bin && new_bin <= rank_bin_range.rank_first + num_bins - 1) {
+            if (new_bin <= rank_bin_range.rank_first + num_bins - 1) {
                 prev_rank_send_particles.push_back(parts[p_i]);
                 flag = true;
             // last row of this rank and also the rows below
             // for now, no upper bound since it may jump more than one row, but still probably in the next processor
-            } else if (rank_bin_range.rank_last - num_bins + 1 <= new_bin && new_bin <= num_bins * num_bins - 1) {
+            } else if (rank_bin_range.rank_last - num_bins + 1 <= new_bin) {
                 next_rank_send_particles.push_back(parts[p_i]);
                 flag = true;
             }
 
-            int new_bin_local_ind = new_bin - rank_bin_range.ghost_first;
             // If the particle remains in this rank's rowspan, then it needs to be rebinned
-            if (new_bin_local_ind >= 0 && new_bin_local_ind < bins.size()) {
+            if (rank_bin_range.ghost_first <= new_bin && new_bin <= rank_bin_range.ghost_last) {
                 local_particles.push_back(parts[p_i]);
                 flag = true;
             }
@@ -334,13 +325,13 @@ void simulate_one_step(particle_t* parts, int num_parts, double size, int rank, 
     }
 
     std::cout << "rank " << rank << " binning " << prev_rank_recv_particles.size() << " particles from prev rank" << std::endl;
-    bin_particles(rank, prev_rank_recv_particles.data(), prev_rank_recv_particles.size());
+    bin_particles(rank, prev_rank_recv_particles.data(), prev_rank_recv_particles.size(), parts);
 
     std::cout << "rank " << rank << " binning " << local_particles.size() << " local particles" << std::endl;
-    bin_particles(rank, local_particles.data(), local_particles.size());
+    bin_particles(rank, local_particles.data(), local_particles.size(), parts);
 
     std::cout << "rank " << rank << " binning " << next_rank_recv_particles.size() << " particles from next rank" << std::endl;
-    bin_particles(rank, next_rank_recv_particles.data(), next_rank_recv_particles.size());
+    bin_particles(rank, next_rank_recv_particles.data(), next_rank_recv_particles.size(), parts);
 }
 
 void gather_for_save(particle_t* parts, int num_parts, double size, int rank, int num_procs) {
@@ -403,11 +394,8 @@ void gather_for_save(particle_t* parts, int num_parts, double size, int rank, in
 
     // On rank 0, sort the gathered particles by particle id.
     if (rank == 0) {
-        std::sort(gathered.begin(), gathered.end(),
-                  [](const particle_t& a, const particle_t& b) { return a.id < b.id; });
-        // Copy the sorted particles back into the parts array.
-        for (int i = 0; i < total_count; i++) {
-            parts[i] = gathered[i];
+        for (const auto& particle : gathered) {
+            parts[particle.id - 1] = particle;
         }
     }
 }
