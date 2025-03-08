@@ -31,11 +31,11 @@ struct BinRange {
     int rank_last;
     int ghost_last;
 
-    friend std::ostream& operator<<(std::ostream& os, const BinRange& br) {
-        os << "ghost_first: " << br.ghost_first << ", rank_first: " << br.rank_first
-           << ", rank_last: " << br.rank_last << ", ghost_last: " << br.ghost_last;
-        return os;
-    }
+    // friend std::ostream& operator<<(std::ostream& os, const BinRange& br) {
+    //     os << "ghost_first: " << br.ghost_first << ", rank_first: " << br.rank_first
+    //        << ", rank_last: " << br.rank_last << ", ghost_last: " << br.ghost_last;
+    //     return os;
+    // }
 };
 
 static std::vector<std::vector<int>>
