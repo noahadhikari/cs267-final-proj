@@ -3,8 +3,13 @@
 #include <unordered_map>
 #include <vector>
 
+/* 
+* This code generates dense vectors of random real numbers in [0, 1].
+* The vectors can be generated using different distributions (uniform, geometric, Poisson).
+* The desired density of the vectors can also be specified.
+*/
 template <typename Distribution>
-std::vector<double> dense_vector(size_t length, Distribution dist, double goal_density) {
+std::vector<double> dense_vector(size_t length, Distribution& dist, double goal_density) {
     std::random_device rd;
     std::mt19937 rng(rd());
     std::uniform_real_distribution<> uniform_dist(0., 1.);
@@ -30,8 +35,14 @@ std::vector<double> dense_vector(size_t length, Distribution dist, double goal_d
     return result;
 }
 
+
+/* 
+* This code generates sparse vectors (represented as a map of index->value) of random real numbers in [0, 1].
+* The vectors can be generated using different distributions (uniform, geometric, Poisson).
+* The desired density of the vectors can also be specified.
+*/
 template <typename Distribution>
-std::unordered_map<size_t, double> sparse_vector(size_t length, Distribution dist, double goal_density) {
+std::unordered_map<size_t, double> sparse_vector(size_t length, Distribution& dist, double goal_density) {
     std::random_device rd;
     std::mt19937 rng(rd());
     std::uniform_real_distribution<> uniform_dist(0., 1.);
