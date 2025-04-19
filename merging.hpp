@@ -1,9 +1,31 @@
-#include "vector-gen.hpp"
+#ifndef _MERGING_HPP
+#define _MERGING_HPP
 
+#include "vector-gen.hpp"
 #include <algorithm>
 #include <queue>
 #include <unordered_map>
 #include <vector>
+
+// assumes a and b are the same size
+DenseVector two_way_merge(const DenseVector& a, const DenseVector& b) {
+    DenseVector result(a.size());
+    for (size_t i = 0; i < a.size(); ++i) {
+        result[i] = a[i] + b[i];
+    }
+    return result;
+}
+
+// assumes all vecs are the same size
+DenseVector k_way_merge(const std::vector<DenseVector>& vecs) {
+    DenseVector result(vecs[0].size());
+    for (size_t i = 0; i < vecs.size(); ++i) {
+        for (size_t j = 0; j < vecs[0].size(); ++j) {
+            result[j] += vecs[i][j];
+        }
+    }
+    return result;
+}
 
 SparseVector two_way_merge(const SparseVector& a, const SparseVector& b) {
     SparseVector result;
@@ -27,7 +49,11 @@ SparseVector two_way_merge(const SparseVector& a, const SparseVector& b) {
 }
 
 SparseVector k_way_merge(const std::vector<SparseVector>& vecs) {
-    // TODO
+
+    return SparseVector();
+
+
+    // TODO implement or don't
     // (specific item in vec, jth vector in vecs)
     // using PQItem = std::pair<IndexValue, size_t>;
 
@@ -44,12 +70,15 @@ SparseVector k_way_merge(const std::vector<SparseVector>& vecs) {
 
     // }
 
+
 }
 
 SparseVector hash_merge(const std::vector<SparseVector>& vecs) {
     std::unordered_map<size_t, ValueType> merged_map;
     for (const auto& vec : vecs) {
-        for (const auto& [index, value] : vec) {
+        for (const auto& pair : vec) {
+            const auto& index = pair.first;
+            const auto& value = pair.second;
             if (merged_map.find(index) == merged_map.end()) {
                 merged_map[index] = value;
             } else {
@@ -66,3 +95,5 @@ SparseVector hash_merge(const std::vector<SparseVector>& vecs) {
 
     return merged_vec;
 }
+
+#endif

@@ -14,8 +14,8 @@ if (NOT "${CMAKE_C_COMPILER_ID}" STREQUAL "GNU")
             "module swap ${Prg-${CMAKE_C_COMPILER_ID}} PrgEnv-gnu")
 endif ()
 
-add_executable(mpi main.cpp mpi.cpp common.h)
-target_link_libraries(mpi PRIVATE MPI::MPI_CXX)
+add_executable(sparse main.cpp common.h)
+target_link_libraries(sparse PRIVATE MPI::MPI_CXX)
 
 # Copy the job scripts
-configure_file(job-mpi job-mpi COPYONLY)
+configure_file(job-sparse job-sparse COPYONLY)

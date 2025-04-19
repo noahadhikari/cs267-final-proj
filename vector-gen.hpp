@@ -1,3 +1,8 @@
+#ifndef __CS267_VECTOR_GEN_HPP__
+#define __CS267_VECTOR_GEN_HPP__
+
+
+#include <algorithm>
 #include <iostream>
 #include <random>
 #include <unordered_map>
@@ -9,29 +14,7 @@
 using ValueType = double;
 using IndexValue = std::pair<size_t, ValueType>;
 using SparseVector = std::vector<IndexValue>;
-
-std::vector<ValueType> convert_to_dense(const SparseVector& vec, size_t length) {
-    std::vector<ValueType> dense_vector(length);
-    for (const auto& [index, value] : vec) {
-        dense_vector[index] = value;
-    }
-    return dense_vector;
-}
-
-SparseVector sparse_uniform_vector(size_t length, double density) {
-    std::uniform_real_distribution<> dist(0, 1);
-    return sparse_vector(length, dist, density);
-}
-
-SparseVector sparse_geometric_vector(size_t length, double p, double density) {
-    std::geometric_distribution<> dist(p);
-    return sparse_vector(length, dist, density);
-}
-
-SparseVector sparse_poisson_vector(size_t length, double lambda, double density) {
-    std::poisson_distribution<> dist(lambda);
-    return sparse_vector(length, dist, density);
-}
+using DenseVector = std::vector<ValueType>;
 
 // ----------------
 // Helper functions
@@ -54,44 +37,18 @@ bool contains_index(const SparseVector& v, size_t index) {
     return false;
 }
 
-/* 
-* This code generates dense vectors of random real numbers in [0, 1].
-* The vectors can be generated using different distributions (uniform, geometric, Poisson).
-* The desired density of the vectors can also be specified.
-*/
-template <typename Distribution>
-std::vector<ValueType> dense_vector(size_t length, Distribution& dist, double goal_density) {
-    std::random_device rd;
-    std::mt19937 rng(rd());
-    std::uniform_real_distribution<> uniform_dist(0., 1.);
-    std::vector<ValueType> result(length);
-    size_t count = 0;
-    
-    do {
-        size_t index = length * dist(rng);
-        if (index < length) {
-            // check if the index isn't already filled
-            if (result[index] == 0.0) {
-                ValueType value = generate_value(uniform_dist, rng);
-                result[index] = value;
-                ++count;
-            }
-        }
-    } while (static_cast<double>(count) / length < goal_density);
-
-    return result;
-}
-
 
 /* 
 * This code generates sparse vectors (represented as a vector of index->value) of random real numbers in [0, 1].
 * The vectors can be generated using different distributions (uniform, geometric, Poisson).
 * The desired density of the vectors can also be specified.
+
+* multiplier is the factor to scale the generated index to have an expected value of length/2 (analogous to uniform distribution)
 */
 template <typename Distribution>
-SparseVector sparse_vector(size_t length, Distribution& dist, double goal_density) {
-    std::random_device rd;
-    std::mt19937 rng(rd());
+SparseVector sparse_vector(long seed, size_t length, Distribution& dist, double goal_density, double multiplier) {
+    std::mt19937 rng;
+    rng.seed(seed);
     std::uniform_real_distribution<> uniform_dist(0., 1.);
 
     SparseVector result;
@@ -99,7 +56,7 @@ SparseVector sparse_vector(size_t length, Distribution& dist, double goal_densit
     size_t count = 0;
 
     do {
-        size_t index = length * dist(rng);
+        size_t index = multiplier * dist(rng);
         if (index < length) {
             // check if the index isn't already filled
             if (!contains_index(result, index)) {
@@ -108,10 +65,35 @@ SparseVector sparse_vector(size_t length, Distribution& dist, double goal_densit
                 ++count;
             }
         }
-    } while (static_cast<double>(count) / length < goal_density);
+    } while ((static_cast<double>(count) / length) < goal_density);
 
     // sort the vector, default comparison is by the first element of the pair, which is the index, which is what we want
     std::sort(result.begin(), result.end());
 
     return result;
 }
+
+DenseVector convert_to_dense(const SparseVector& vec, size_t length) {
+    DenseVector dense_vector(length);
+    for (const auto& pair: vec) {
+        dense_vector[pair.first] = pair.second;
+    }
+    return dense_vector;
+}
+
+SparseVector sparse_uniform_vector(long seed, size_t length, double density) {
+    std::uniform_real_distribution<> dist(0, 1);
+    return sparse_vector(seed, length, dist, density, length);
+}
+
+SparseVector sparse_exponential_vector(long seed, size_t length, double lambda, double density) {
+    std::exponential_distribution<> dist(lambda);
+    return sparse_vector(seed, length, dist, density, length * lambda / 2);
+}
+
+SparseVector sparse_poisson_vector(long seed, size_t length, double lambda, double density) {
+    std::poisson_distribution<> dist(lambda);
+    return sparse_vector(seed, length, dist, density, length * 1 / (2 * lambda));
+}
+
+#endif

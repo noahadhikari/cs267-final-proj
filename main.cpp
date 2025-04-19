@@ -7,7 +7,6 @@
 #include <mpi.h>
 #include <random>
 #include <vector>
-#include "vector-gen.hpp"
 #include <stddef.h>
 
 // =================
@@ -30,6 +29,14 @@ void save() {
     // fsave << std::endl;
 }
 
+void print_dense_vector(const DenseVector& vec) {
+    std::cout << "[ ";
+    for (const auto& val : vec) {
+        std::cout << val << " ";
+    }
+    std::cout << "]\n";
+}
+
 int main(int argc, char** argv) {
     // Open Output File
     // char* savename = find_string_option(argc, argv, "-o", nullptr);
@@ -43,10 +50,9 @@ int main(int argc, char** argv) {
     MPI_Comm_size(MPI_COMM_WORLD, &num_procs);
     MPI_Comm_rank(MPI_COMM_WORLD, &rank);
 
-    MPI_Datatype mpi_pair_type;
     int blocklengths[2] = {1, 1};
     MPI_Aint offsets[2];
-    MPI_Datatype types[2] = {MPI_UNSIGNED_INT, MPI_DOUBLE}; //TODO: NOT SURE IF SIZE_T IS UNSIGNED INT OR LONG
+    MPI_Datatype types[2] = {MPI_UNSIGNED_LONG, MPI_DOUBLE}; //TODO: NOT SURE IF SIZE_T IS UNSIGNED INT OR LONG
     
     offsets[0] = offsetof(IndexValue, first);
     offsets[1] = offsetof(IndexValue, second);
@@ -54,18 +60,19 @@ int main(int argc, char** argv) {
     MPI_Type_create_struct(2, blocklengths, offsets, types, &MPI_INDEX_VALUE_TYPE);
     MPI_Type_commit(&MPI_INDEX_VALUE_TYPE);
 
-    int length, density, baseline, distribution;
-    double param;
+    int length = 10000000;
+    int baseline = 1; // default: naive
+    int distribution = 1; // default: uniform
+    double density = 0.1;
+    double lambda = 0.1;
+    long seed = 0;
     SparseVector vec;
-    baseline = 1; // default: naive
-    distribution = 1; // default: uniform
-    param = 1;
     // Parse Args
     for (int i = 1; i < argc; ++i) {
         if (strcmp(argv[i], "-l") == 0 && i + 1 < argc) {
             length = std::stoi(argv[++i]);
         } else if (strcmp(argv[i], "-d") == 0 && i + 1 < argc) {
-            density = std::stoi(argv[++i]);
+            density = std::stod(argv[++i]);
         } else if (strcmp(argv[i], "-b") == 0 && i + 1 < argc) {
             // indicate which baseline to run
             baseline = std::stoi(argv[++i]);
@@ -74,7 +81,10 @@ int main(int argc, char** argv) {
             distribution = std::stoi(argv[++i]);
         } else if (strcmp(argv[i], "-p") == 0 && i + 1 < argc) {
             // indicate param for geometric and poisson distribution
-            param = std::stoi(argv[++i]);
+            lambda = std::stod(argv[++i]);
+        } else if (strcmp(argv[i], "-s") == 0 && i + 1 < argc) {
+            // indicate seed for random number generation
+            seed = std::stol(argv[++i]);
         }
     }
 
@@ -82,40 +92,46 @@ int main(int argc, char** argv) {
     switch (distribution) {
         // uniform
         case 1: {
-            vec = sparse_uniform_vector(length, density);
+            vec = sparse_uniform_vector(seed, length, density);
             break;
         }
-        // geometric
+        // exponential
         case 2: {
-            vec = sparse_geometric_vector(length, param, density);
+            vec = sparse_exponential_vector(seed, length, lambda, density);
             break;
         }
         // poisson
         case 3: {
-            vec = sparse_geometric_vector(length, param, density);
+            vec = sparse_poisson_vector(seed, length, lambda, density);
             break;
         }
         default:
             std::cerr << "Unknown distribution " << baseline << "\n";
             return 1;
     }
+
     auto start_time = std::chrono::steady_clock::now();
 
     switch (baseline) {
         // dense vector baseline
         case 1: {
-            std::vector<ValueType> dense_vec = convert_to_dense(vec);
-            
-
+            // TODO: update to start the time after conversion
+            DenseVector dense_vec = convert_to_dense(vec, length);
+            std::vector<DenseVector> all_vecs = all_to_all_comm_dense(dense_vec, rank, num_procs);
+            DenseVector result = k_way_merge(all_vecs);
+            print_dense_vector(result);
+            break;
         }
+        // sparse vector + hashmap merge
         case 2: {
+            std::vector<SparseVector> all_vecs = all_to_all_comm_sparse(vec, rank, num_procs);
+            SparseVector result = hash_merge(all_vecs);
             break;
         }
         default:
             std::cerr << "Unknown baseline " << baseline << "\n";
             return 1;
     }
-
 
     auto end_time = std::chrono::steady_clock::now();
 
@@ -126,11 +142,11 @@ int main(int argc, char** argv) {
     if (rank == 0) {
         std::cout << "Time = " << seconds << " seconds." << "\n";
     }
-    if (fsave) {
-        fsave.close();
-    }
+    // if (fsave) {
+    //     fsave.close();
+    // }
 
-    MPI_Type_free(&mpi_pair_type);
+    MPI_Type_free(&MPI_INDEX_VALUE_TYPE);
     MPI_Finalize();
     return 0;
 }

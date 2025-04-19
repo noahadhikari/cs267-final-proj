@@ -7,4 +7,4 @@
 #SBATCH -t 00:30:00
 
 #run the application:
-srun ./mpi
+srun ./sparse
