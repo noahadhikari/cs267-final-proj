@@ -52,17 +52,28 @@ std::vector<SparseVector> all_to_all_comm_sparse(const SparseVector& vec, int ra
     return result;
 }
 
-std::vector<DenseVector> all_to_all_comm_dense(const DenseVector& vec, int rank, int num_procs) {
+// std::vector<DenseVector> all_to_all_comm_dense(const DenseVector& vec, int rank, int num_procs) {
+//     int vec_len = vec.size();
+//     std::vector<double> recvbuf(vec_len * num_procs);
+
+//     MPI_Alltoall(vec.data(), vec_len, MPI_DOUBLE, recvbuf.data(), vec_len, MPI_DOUBLE, MPI_COMM_WORLD);
+
+//     std::vector<DenseVector> result(num_procs, DenseVector(vec_len));
+//     for (int i = 0; i < num_procs; ++i) {
+//         std::memcpy(result[i].data(), recvbuf.data() + i * vec_len, vec_len * sizeof(ValueType));
+//     }
+//     return result;
+// }
+
+// assumes ValueType = int
+std::vector<ValueType> all_reduce_sum_dense(const DenseVector& vec, int rank, int num_procs) {
     int vec_len = vec.size();
-    std::vector<double> recvbuf(vec_len * num_procs);
+    std::vector<ValueType> sendbuf(vec.begin(), vec.end()); // copy vec to contiguous memory
+    std::vector<ValueType> recvbuf(vec_len);
 
-    MPI_Alltoall(vec.data(), vec_len, MPI_DOUBLE, recvbuf.data(), vec_len, MPI_DOUBLE, MPI_COMM_WORLD);
+    MPI_Allreduce(sendbuf.data(), recvbuf.data(), vec_len, MPI_INT, MPI_SUM, MPI_COMM_WORLD);
 
-    std::vector<DenseVector> result(num_procs, DenseVector(vec_len));
-    for (int i = 0; i < num_procs; ++i) {
-        std::memcpy(result[i].data(), recvbuf.data() + i * vec_len, vec_len * sizeof(ValueType));
-    }
-    return result;
+    return recvbuf;
 }
 
 

@@ -134,11 +134,10 @@ int main(int argc, char** argv) {
             std::cout << "Rank" << rank << ": ";
             print_dense_vector(dense_vec);
 
-            std::vector<DenseVector> all_vecs = all_to_all_comm_dense(dense_vec, rank, num_procs);
-            DenseVector result = k_way_merge(all_vecs);
+            std::vector<ValueType> reduced_vec = all_reduce_sum_dense(dense_vec, rank, num_procs);
 
             std::cout << "Rank" << rank << ": ";
-            print_dense_vector(result);
+            print_dense_vector(reduced_vec);
             break;
         }
         // sparse vector + hashmap merge
