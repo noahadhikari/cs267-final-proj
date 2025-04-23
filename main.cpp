@@ -37,6 +37,14 @@ void print_dense_vector(const DenseVector& vec) {
     std::cout << "]\n";
 }
 
+void print_sparse_vector(const SparseVector& vec) {
+    std::cout << "[ ";
+    for (const auto& pair : vec) {
+        std::cout << "(" << pair.first << ", " << pair.second << ") ";
+    }
+    std::cout << "]\n";
+}
+
 int main(int argc, char** argv) {
     // Open Output File
     // char* savename = find_string_option(argc, argv, "-o", nullptr);
@@ -44,6 +52,8 @@ int main(int argc, char** argv) {
 
     // Init MPI
     // TODO: initialize
+
+
     int num_procs, rank; // TODO: number of processes is defined when running mpirun or smth
     
     MPI_Init(&argc, &argv); 
@@ -60,12 +70,13 @@ int main(int argc, char** argv) {
     MPI_Type_create_struct(2, blocklengths, offsets, types, &MPI_INDEX_VALUE_TYPE);
     MPI_Type_commit(&MPI_INDEX_VALUE_TYPE);
 
-    int length = 10000000;
+    int length = 1000;
     int baseline = 1; // default: naive
     int distribution = 1; // default: uniform
     double density = 0.1;
     double lambda = 0.1;
     long seed = 0;
+
     SparseVector vec;
     // Parse Args
     for (int i = 1; i < argc; ++i) {
@@ -74,10 +85,10 @@ int main(int argc, char** argv) {
         } else if (strcmp(argv[i], "-d") == 0 && i + 1 < argc) {
             density = std::stod(argv[++i]);
         } else if (strcmp(argv[i], "-b") == 0 && i + 1 < argc) {
-            // indicate which baseline to run
+            // indicate which baseline to run, 1 for dense, 2 for sparse
             baseline = std::stoi(argv[++i]);
         } else if (strcmp(argv[i], "-v") == 0 && i + 1 < argc) {
-            // indicate which vector distribution to generate
+            // indicate which vector distribution to generate, 1 for uniform, 2 for exponential, 3 for poisson
             distribution = std::stoi(argv[++i]);
         } else if (strcmp(argv[i], "-p") == 0 && i + 1 < argc) {
             // indicate param for geometric and poisson distribution
@@ -87,6 +98,8 @@ int main(int argc, char** argv) {
             seed = std::stol(argv[++i]);
         }
     }
+
+    seed += rank; // make the seed unique for each process
 
     // generate vector distribution
     switch (distribution) {
@@ -117,15 +130,26 @@ int main(int argc, char** argv) {
         case 1: {
             // TODO: update to start the time after conversion
             DenseVector dense_vec = convert_to_dense(vec, length);
+
+            std::cout << "Rank" << rank << ": ";
+            print_dense_vector(dense_vec);
+
             std::vector<DenseVector> all_vecs = all_to_all_comm_dense(dense_vec, rank, num_procs);
             DenseVector result = k_way_merge(all_vecs);
+
+            std::cout << "Rank" << rank << ": ";
             print_dense_vector(result);
             break;
         }
         // sparse vector + hashmap merge
         case 2: {
+            std::cout << "Rank" << rank << ": ";
+            print_sparse_vector(vec);
             std::vector<SparseVector> all_vecs = all_to_all_comm_sparse(vec, rank, num_procs);
             SparseVector result = hash_merge(all_vecs);
+
+            std::cout << "Rank" << rank << ": ";
+            print_sparse_vector(result);
             break;
         }
         default:

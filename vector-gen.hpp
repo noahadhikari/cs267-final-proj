@@ -11,7 +11,7 @@
 #include <utility>
 
 
-using ValueType = double;
+using ValueType = int;
 using IndexValue = std::pair<size_t, ValueType>;
 using SparseVector = std::vector<IndexValue>;
 using DenseVector = std::vector<ValueType>;
