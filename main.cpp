@@ -142,13 +142,22 @@ int main(int argc, char** argv) {
         }
         // sparse vector + hashmap merge
         case 2: {
-            std::cout << "Rank" << rank << ": ";
-            print_sparse_vector(vec);
+            // std::cout << "Rank" << rank << ": ";
+            // print_sparse_vector(vec);
             std::vector<SparseVector> all_vecs = all_to_all_comm_sparse(vec, rank, num_procs);
             SparseVector result = hash_merge(all_vecs);
 
-            std::cout << "Rank" << rank << ": ";
-            print_sparse_vector(result);
+            // std::cout << "Rank" << rank << ": ";
+            // print_sparse_vector(result);
+            break;
+        }
+        // sparse vector + butterfly merge
+        case 3 : {
+            // std::cout << "Rank" << rank << ": ";
+            // print_sparse_vector(vec);
+            SparseVector result = butterfly_reduce_sparse(vec, rank, num_procs);
+            // std::cout << "Rank" << rank << ": ";
+            // print_sparse_vector(result);
             break;
         }
         default:
