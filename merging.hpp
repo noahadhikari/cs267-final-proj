@@ -32,7 +32,7 @@ SparseVector two_way_merge(const SparseVector& a, const SparseVector& b) {
     size_t i = 0, j = 0;
     while (i < a.size() && j < b.size()) {
         if (a[i].first == b[j].first) {
-            result.emplace_back(a[i].first, a[i].second + b[i].second);
+            result.emplace_back(a[i].first, a[i].second + b[j].second);
             ++i;
             ++j;
         } else if (a[i].first < b[j].first) {
