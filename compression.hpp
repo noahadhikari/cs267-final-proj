@@ -1,4 +1,5 @@
 #include "vector-gen.hpp"
+#include <bitset>
 
 struct DeltaEncodedVector {
     std::vector<ValueType> values;
@@ -66,3 +67,40 @@ SparseVector delta_decode(const DeltaEncodedVector& dev) {
     return result;
 }
 
+
+
+
+constexpr size_t VECTOR_LENGTH = 10000; // number of bits in mask. need to know at compile-time
+
+struct BitmaskVector {
+    std::bitset<VECTOR_LENGTH> mask;
+    std::vector<ValueType> values;
+};
+
+BitmaskVector bitmask_encode(const SparseVector& sparse_vector) {
+    BitmaskVector result;
+    result.values.reserve(sparse_vector.size());
+
+    // run through the vector indices to get nonzero bits and copy the values
+    for (const IndexValue& iv : sparse_vector) {
+        result.values.emplace_back(iv.second);
+        size_t index = iv.first;
+        if (index < VECTOR_LENGTH) {
+            result.mask.set(index);
+        }
+    }
+    return result;
+}
+
+SparseVector bitmask_decode(const BitmaskVector& bmv) {
+    SparseVector result;
+    size_t num_values = bmv.values.size();
+
+    for (size_t i = 0; i < VECTOR_LENGTH; ++i) {
+        if (bmv.mask.test(i)) {
+            result.emplace_back(i, bmv.values[i]);
+        }
+    }
+
+    return result;
+}
