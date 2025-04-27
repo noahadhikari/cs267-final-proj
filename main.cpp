@@ -140,7 +140,7 @@ int main(int argc, char** argv) {
             print_dense_vector(reduced_vec);
             break;
         }
-        // sparse vector + hashmap merge
+        // sparse vector baseline
         case 2: {
             // std::cout << "Rank" << rank << ": ";
             // print_sparse_vector(vec);
@@ -151,8 +151,8 @@ int main(int argc, char** argv) {
             // print_sparse_vector(result);
             break;
         }
-        // sparse vector + butterfly merge
-        case 3 : {
+        // sparse vector + butterfly
+        case 3: {
             // std::cout << "Rank" << rank << ": ";
             // print_sparse_vector(vec);
             SparseVector result = butterfly_reduce_sparse(vec, rank, num_procs);
@@ -160,6 +160,15 @@ int main(int argc, char** argv) {
             // print_sparse_vector(result);
             break;
         }
+        // sparse vector + tree
+        case 4: {
+            // std::cout << "Rank" << rank << ": ";
+            // print_sparse_vector(vec);
+            SparseVector result = tree_reduce_sparse(vec, rank, num_procs);
+            // std::cout << "Rank" << rank << ": ";
+            // print_sparse_vector(result);
+            break;
+        } 
         default:
             std::cerr << "Unknown baseline " << baseline << "\n";
             return 1;
