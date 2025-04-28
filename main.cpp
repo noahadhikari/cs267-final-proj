@@ -78,7 +78,7 @@ int main(int argc, char** argv) {
     int baseline = 1; // default: naive
     int distribution = 1; // default: uniform
     double density = 0.1;
-    double lambda = 0.1;
+    double param = 0.1;
     long seed = 0;
 
     SparseVector vec;
@@ -95,11 +95,11 @@ int main(int argc, char** argv) {
             // indicate which vector distribution to generate, 1 for uniform, 2 for exponential, 3 for poisson
             distribution = std::stoi(argv[++i]);
             if (distribution == 3) {
-                lambda = length / 2;
+                param = length / 2;
             }
         } else if (strcmp(argv[i], "-p") == 0 && i + 1 < argc) {
             // indicate param for geometric and poisson distribution
-            lambda = std::stod(argv[++i]);
+            param = std::stod(argv[++i]);
         } else if (strcmp(argv[i], "-s") == 0 && i + 1 < argc) {
             // indicate seed for random number generation
             seed = std::stol(argv[++i]);
@@ -117,12 +117,12 @@ int main(int argc, char** argv) {
         }
         // exponential
         case 2: {
-            vec = sparse_exponential_vector(seed, length, lambda, density);
+            vec = sparse_exponential_vector(seed, length, param, density);
             break;
         }
         // poisson
         case 3: {
-            vec = sparse_poisson_vector(seed, length, lambda, density);
+            vec = sparse_poisson_vector(seed, length, param, density);
             break;
         }
         default:
@@ -138,13 +138,13 @@ int main(int argc, char** argv) {
             DenseVector dense_vec = convert_to_dense(vec, length);
             start_time = std::chrono::steady_clock::now();
 
-            // std::cout << "Rank" << rank << ": ";
-            // print_dense_vector(dense_vec);
+            std::cout << "Rank" << rank << ": ";
+            print_dense_vector(dense_vec);
 
             std::vector<ValueType> reduced_vec = all_reduce_sum_dense(dense_vec, rank, num_procs);
 
-            // std::cout << "Rank" << rank << ": ";
-            // print_dense_vector(reduced_vec);
+            std::cout << "Rank" << rank << ": ";
+            print_dense_vector(reduced_vec);
             break;
         }
         // sparse vector baseline
