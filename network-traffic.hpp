@@ -9,9 +9,173 @@
 #include <cstring>
 #include <mpi.h>
 
+#include "compression.hpp"
+
 MPI_Datatype MPI_INDEX_VALUE_TYPE;
 
-std::vector<SparseVector> all_to_all_comm_sparse(const SparseVector& vec, int rank, int num_procs){
+enum class CompressionType {
+    NONE,
+    DELTA,
+    BITMASK,
+};
+
+std::vector<DeltaEncodedVector> alltoallv_comm_sparse_delta(const DeltaEncodedVector& vec, int rank, int num_procs) {
+    // Send vector lengths
+    int vec_len = vec.values.size();
+    std::vector<int> all_vector_lengths(num_procs);
+    MPI_Allgather(&vec_len, 1, MPI_INT, all_vector_lengths.data(), 1, MPI_INT, MPI_COMM_WORLD);
+
+    // Send bytes_per_delta
+    int bytes_per_delta = vec.bytes_per_delta;
+    std::vector<int> all_bytes_per_delta(num_procs);
+    MPI_Allgather(&bytes_per_delta, 1, MPI_INT, all_bytes_per_delta.data(), 1, MPI_INT, MPI_COMM_WORLD);
+
+    //
+    // Send delta_data
+    //
+
+    int delta_len = vec.delta_data.size();
+    std::vector<int> all_delta_lengths(num_procs);
+    MPI_Allgather(&delta_len, 1, MPI_INT, all_delta_lengths.data(), 1, MPI_INT, MPI_COMM_WORLD);
+
+    std::vector<int> sendcounts_delta(num_procs, delta_len);
+    std::vector<int> sdispls_delta(num_procs, 0);
+    std::vector<int> rdispls_delta(num_procs, 0);
+
+    int total_recv_delta = 0;
+    for (int i = 0; i < num_procs; i++) {
+        rdispls_delta[i] = total_recv_delta;
+        total_recv_delta += all_delta_lengths[i];
+    }
+
+    std::vector<uint8_t> all_delta_data(total_recv_delta);
+
+    MPI_Alltoallv(vec.delta_data.data(), sendcounts_delta.data(), sdispls_delta.data(), MPI_UINT8_T,
+                  all_delta_data.data(), all_delta_lengths.data(), rdispls_delta.data(), MPI_UINT8_T,
+                  MPI_COMM_WORLD);
+
+    //
+    // Send values
+    //
+
+    std::vector<int> sendcounts_val(num_procs, vec_len);
+    std::vector<int> sdispls_val(num_procs, 0);
+    std::vector<int> rdispls_val(num_procs, 0);
+
+    int total_recv_val = 0;
+    for (int i = 0; i < num_procs; i++) {
+        rdispls_val[i] = total_recv_val;
+        total_recv_val += all_vector_lengths[i];
+    }
+
+    std::vector<ValueType> all_values(total_recv_val);
+
+    MPI_Alltoallv(vec.values.data(), sendcounts_val.data(), sdispls_val.data(), MPI_INT,
+                  all_values.data(), all_vector_lengths.data(), rdispls_val.data(), MPI_INT,
+                  MPI_COMM_WORLD);
+
+    //
+    // Rebuild DeltaEncodedVectors
+    //
+
+    std::vector<DeltaEncodedVector> results(num_procs);
+
+    for (int src = 0; src < num_procs; src++) {
+        // Extract slices
+        std::vector<ValueType> values(
+            all_values.begin() + rdispls_val[src],
+            all_values.begin() + rdispls_val[src] + all_vector_lengths[src]
+        );
+
+        std::vector<uint8_t> delta_data(
+            all_delta_data.begin() + rdispls_delta[src],
+            all_delta_data.begin() + rdispls_delta[src] + all_delta_lengths[src]
+        );
+
+        DeltaEncodedVector reconstructed;
+        reconstructed.values = std::move(values);
+        reconstructed.delta_data = std::move(delta_data);
+        reconstructed.bytes_per_delta = all_bytes_per_delta[src];
+
+        results[src] = std::move(reconstructed);
+    }
+
+    return results;
+}
+
+std::vector<BitmaskEncodedVector> alltoallv_comm_sparse_bitmask(const BitmaskEncodedVector& vec, int rank, int num_procs) {
+    // --- Step 1: Send bitsets ---
+    constexpr int num_words = (VECTOR_LENGTH + 63) / 64;
+
+    std::vector<uint64_t> send_buffer(num_words, 0);
+    for (int i = 0; i < VECTOR_LENGTH; ++i) {
+        if (vec.mask[i]) {
+            send_buffer[i / 64] |= (uint64_t(1) << (i % 64));
+        }
+    }
+
+    std::vector<uint64_t> recv_buffer(num_words * num_procs);
+
+    MPI_Allgather(
+        send_buffer.data(), num_words, MPI_UINT64_T,
+        recv_buffer.data(), num_words, MPI_UINT64_T,
+        MPI_COMM_WORLD
+    );
+
+    // --- Step 2: Send values ---
+    int local_num_values = vec.values.size();
+    std::vector<int> all_num_values(num_procs);
+    MPI_Allgather(
+        &local_num_values, 1, MPI_INT,
+        all_num_values.data(), 1, MPI_INT,
+        MPI_COMM_WORLD
+    );
+
+    std::vector<int> displs(num_procs, 0);
+    int total_recv_values = 0;
+    for (int i = 0; i < num_procs; ++i) {
+        displs[i] = total_recv_values;
+        total_recv_values += all_num_values[i];
+    }
+
+    std::vector<ValueType> all_values(total_recv_values);
+
+    MPI_Allgatherv(
+        vec.values.data(), local_num_values, MPI_INT,
+        all_values.data(), all_num_values.data(), displs.data(), MPI_INT,
+        MPI_COMM_WORLD
+    );
+
+    // --- Step 3: Rebuild ---
+    std::vector<BitmaskEncodedVector> result(num_procs);
+    int values_cursor = 0;
+
+    for (int proc = 0; proc < num_procs; ++proc) {
+        BitmaskEncodedVector tmp;
+        tmp.mask.reset();
+
+        for (int i = 0; i < VECTOR_LENGTH; ++i) {
+            if (recv_buffer[proc * num_words + (i / 64)] & (uint64_t(1) << (i % 64))) {
+                tmp.mask.set(i);
+            }
+        }
+
+        int num_vals = all_num_values[proc];
+        tmp.values.reserve(num_vals);
+        for (int k = 0; k < num_vals; ++k) {
+            tmp.values.push_back(all_values[values_cursor++]);
+        }
+
+        result[proc] = std::move(tmp);
+    }
+
+    return result;
+}
+
+
+
+
+std::vector<SparseVector> alltoallv_comm_sparse_nocompress(const SparseVector& vec, int rank, int num_procs) {
     int vec_len = vec.size();
     int* all_vector_lengths = (int*) malloc(num_procs * sizeof(int));
 
@@ -50,6 +214,31 @@ std::vector<SparseVector> all_to_all_comm_sparse(const SparseVector& vec, int ra
     free(all_vectors);
     
     return result;
+}
+
+
+
+SparseVector alltoallv_comm_sparse(const SparseVector& vec, int rank, int num_procs, CompressionType compression_type) {
+
+    switch (compression_type) {
+        case CompressionType::NONE: {
+            return hash_merge(alltoallv_comm_sparse_nocompress(vec, rank, num_procs));
+        }
+        case CompressionType::DELTA: {
+            auto delta_encoded = delta_encode(vec);
+            auto delta_collected = alltoallv_comm_sparse_delta(delta_encoded, rank, num_procs);
+            auto delta_decoded = delta_decode_all(delta_collected);
+            return hash_merge(delta_decoded);
+        }
+        case CompressionType::BITMASK: {   
+            auto bitmask_encoded = bitmask_encode(vec);
+            auto bitmask_collected = alltoallv_comm_sparse_bitmask(bitmask_encoded, rank, num_procs);
+            auto bitmask_decoded = bitmask_decode_all(bitmask_collected);
+            return hash_merge(bitmask_decoded);
+        }
+        default:
+            throw std::invalid_argument("Unknown compression type");
+    }
 }
 
 // std::vector<DenseVector> all_to_all_comm_dense(const DenseVector& vec, int rank, int num_procs) {

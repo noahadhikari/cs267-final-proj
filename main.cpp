@@ -144,8 +144,7 @@ int main(int argc, char** argv) {
         case 2: {
             // std::cout << "Rank" << rank << ": ";
             // print_sparse_vector(vec);
-            std::vector<SparseVector> all_vecs = all_to_all_comm_sparse(vec, rank, num_procs);
-            SparseVector result = hash_merge(all_vecs);
+            SparseVector result = alltoallv_comm_sparse(vec, rank, num_procs, CompressionType::NONE);
 
             // std::cout << "Rank" << rank << ": ";
             // print_sparse_vector(result);
@@ -168,7 +167,36 @@ int main(int argc, char** argv) {
             // std::cout << "Rank" << rank << ": ";
             // print_sparse_vector(result);
             break;
-        } 
+        }
+        // uncompressed alltoall
+        case 11: {
+            std::cout << "Rank" << rank << ": ";
+            print_sparse_vector(vec);
+            SparseVector result = alltoallv_comm_sparse(vec, rank, num_procs, CompressionType::NONE);
+            std::cout << "Rank" << rank << ": ";
+            print_sparse_vector(result);
+            break;
+        }
+        // delta alltoall
+        case 12: {
+            std::cout << "Rank" << rank << ": ";
+            print_sparse_vector(vec);
+            SparseVector result = alltoallv_comm_sparse(vec, rank, num_procs, CompressionType::DELTA);
+            std::cout << "Rank" << rank << ": ";
+            print_sparse_vector(result);
+            break;
+
+        }
+        // bitmask alltoall
+        case 13: {
+            std::cout << "Rank" << rank << ": ";
+            print_sparse_vector(vec);
+            SparseVector result = alltoallv_comm_sparse(vec, rank, num_procs, CompressionType::BITMASK);
+
+            std::cout << "Rank" << rank << ": ";
+            print_sparse_vector(result);
+            break;
+        }
         default:
             std::cerr << "Unknown baseline " << baseline << "\n";
             return 1;

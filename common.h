@@ -11,5 +11,4 @@
 
 extern MPI_Datatype MPI_INDEX_VALUE_TYPE;
 
-
 #endif

@@ -70,36 +70,58 @@ SparseVector delta_decode(const DeltaEncodedVector& dev) {
 
 
 
-constexpr size_t VECTOR_LENGTH = 10000; // number of bits in mask. need to know at compile-time
 
-struct BitmaskVector {
+constexpr size_t VECTOR_LENGTH = 10000; // number of bits in mask. need to know at compile-time for bitmask compression so can't do as command line arg
+struct BitmaskEncodedVector {
     std::bitset<VECTOR_LENGTH> mask;
     std::vector<ValueType> values;
 };
 
-BitmaskVector bitmask_encode(const SparseVector& sparse_vector) {
-    BitmaskVector result;
+BitmaskEncodedVector bitmask_encode(const SparseVector& sparse_vector) {
+    BitmaskEncodedVector result;
     result.values.reserve(sparse_vector.size());
 
     // run through the vector indices to get nonzero bits and copy the values
     for (const IndexValue& iv : sparse_vector) {
-        result.values.emplace_back(iv.second);
+        result.values.push_back(iv.second);
         size_t index = iv.first;
-        if (index < VECTOR_LENGTH) {
-            result.mask.set(index);
-        }
+        result.mask.set(index);
     }
     return result;
 }
 
-SparseVector bitmask_decode(const BitmaskVector& bmv) {
+SparseVector bitmask_decode(const BitmaskEncodedVector& bmv) {
     SparseVector result;
-    size_t num_values = bmv.values.size();
+    size_t value_index = 0;
 
     for (size_t i = 0; i < VECTOR_LENGTH; ++i) {
         if (bmv.mask.test(i)) {
-            result.emplace_back(i, bmv.values[i]);
+            result.emplace_back(i, bmv.values[value_index]);
+            ++value_index;
         }
+    }
+
+    return result;
+}
+
+
+std::vector<SparseVector> delta_decode_all(const std::vector<DeltaEncodedVector>& devs) {
+    std::vector<SparseVector> result;
+    result.reserve(devs.size());
+
+    for (const DeltaEncodedVector& dev : devs) {
+        result.push_back(delta_decode(dev));
+    }
+
+    return result;
+}
+
+std::vector<SparseVector> bitmask_decode_all(const std::vector<BitmaskEncodedVector>& bmvs) {
+    std::vector<SparseVector> result;
+    result.reserve(bmvs.size());
+
+    for (const BitmaskEncodedVector& bmv : bmvs) {
+        result.push_back(bitmask_decode(bmv));
     }
 
     return result;
