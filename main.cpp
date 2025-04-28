@@ -128,16 +128,16 @@ int main(int argc, char** argv) {
     switch (baseline) {
         // dense vector baseline
         case 1: {
-            // TODO: update to start the time after conversion
             DenseVector dense_vec = convert_to_dense(vec, length);
+            start_time = std::chrono::steady_clock::now();
 
-            std::cout << "Rank" << rank << ": ";
-            print_dense_vector(dense_vec);
+            // std::cout << "Rank" << rank << ": ";
+            // print_dense_vector(dense_vec);
 
             std::vector<ValueType> reduced_vec = all_reduce_sum_dense(dense_vec, rank, num_procs);
 
-            std::cout << "Rank" << rank << ": ";
-            print_dense_vector(reduced_vec);
+            // std::cout << "Rank" << rank << ": ";
+            // print_dense_vector(reduced_vec);
             break;
         }
         // sparse vector baseline
