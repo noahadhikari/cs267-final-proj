@@ -395,35 +395,6 @@ SparseVector tree_reduce_sparse(const SparseVector& vec, int rank, int num_procs
     return result;
 }
 
-SparseVector butterfly_reduce_sparse(const SparseVector& vec, int rank, int num_procs) {
-    SparseVector result = vec;
-
-    for (int i = 0; (1 << i) < num_procs; ++i) {
-        int partner = rank ^ (1 << i);
-        // std::cout << "Rank" << rank << ": ";
-        // std::cout << "Step" << i;
-        // std::cout << "Partner: " << partner << std::endl;
-
-        int send_count = result.size();
-        int recv_count = 0;
-
-        // exchange sizes
-        MPI_Sendrecv(&send_count, 1, MPI_INT, partner, 0, 
-            &recv_count, 1, MPI_INT, partner, 0,
-            MPI_COMM_WORLD, MPI_STATUS_IGNORE);
-
-        std::vector<IndexValue> recv_buffer(recv_count);
-
-        // exchange index-value pairs
-        MPI_Sendrecv(result.data(), send_count, MPI_INDEX_VALUE_TYPE, partner, 1,
-            recv_buffer.data(), recv_count, MPI_INDEX_VALUE_TYPE, partner, 1,
-            MPI_COMM_WORLD, MPI_STATUS_IGNORE);
-        
-        SparseVector partner_vec(recv_buffer.begin(), recv_buffer.end());
-        result = two_way_merge(result, partner_vec);
-    }
-    return result;
-}
 
 SparseVector ring_reduce_sparse(const SparseVector& vec, int rank, int num_procs) {
     SparseVector result = vec;
