@@ -309,8 +309,8 @@ SparseVector tree_reduce_sparse(const SparseVector& vec, int rank, int num_procs
     int right_child = 2 * rank + 2;
 
     // reduce upwards and receive from both left and right child
-    std::vector<SparseVector> vecs;
-    vecs.push_back(result);
+    // std::vector<SparseVector> vecs;
+    // vecs.push_back(result);
     if (left_child < num_procs) {
         int recv_count;
 
@@ -321,7 +321,8 @@ SparseVector tree_reduce_sparse(const SparseVector& vec, int rank, int num_procs
         MPI_Recv(recv_buffer.data(), recv_count, MPI_INDEX_VALUE_TYPE, left_child, 1, MPI_COMM_WORLD, MPI_STATUS_IGNORE);
 
         SparseVector left_vec(recv_buffer.begin(), recv_buffer.end());
-        vecs.push_back(left_vec);
+        // vecs.push_back(left_vec);
+        result = two_way_merge(result, left_vec);
     }
 
     if (right_child < num_procs) {
@@ -334,11 +335,12 @@ SparseVector tree_reduce_sparse(const SparseVector& vec, int rank, int num_procs
         MPI_Recv(recv_buffer.data(), recv_count, MPI_INDEX_VALUE_TYPE, right_child, 1, MPI_COMM_WORLD, MPI_STATUS_IGNORE);
 
         SparseVector right_vec(recv_buffer.begin(), recv_buffer.end());
-        vecs.push_back(right_vec);
+        // vecs.push_back(right_vec);
+        result = two_way_merge(result, right_vec);
     }
 
     // merging
-    result = hash_merge(vecs);
+    // result = hash_merge(vecs);
 
     // send merged result to parent
     if (rank != 0) {
@@ -349,37 +351,47 @@ SparseVector tree_reduce_sparse(const SparseVector& vec, int rank, int num_procs
     }
 
     // broadcast the final result to everyone
-    if (rank == 0) {
-        // root node sends to children
-        if (left_child < num_procs) {
-            int send_count = result.size();
-            MPI_Send(&send_count, 1, MPI_INT, left_child, 2, MPI_COMM_WORLD);
-            MPI_Send(result.data(), send_count, MPI_INDEX_VALUE_TYPE, left_child, 3, MPI_COMM_WORLD);
-        }
-        if (right_child < num_procs) {
-            int send_count = result.size();
-            MPI_Send(&send_count, 1, MPI_INT, right_child, 2, MPI_COMM_WORLD);
-            MPI_Send(result.data(), send_count, MPI_INDEX_VALUE_TYPE, right_child, 3, MPI_COMM_WORLD);
-        }
-    } else {
-        // non root node will receive
-        int recv_count;
-        MPI_Recv(&recv_count, 1, MPI_INT, parent, 2, MPI_COMM_WORLD, MPI_STATUS_IGNORE);
+    // if (rank == 0) {
+    //     // root node sends to children
+    //     if (left_child < num_procs) {
+    //         int send_count = result.size();
+    //         MPI_Send(&send_count, 1, MPI_INT, left_child, 2, MPI_COMM_WORLD);
+    //         MPI_Send(result.data(), send_count, MPI_INDEX_VALUE_TYPE, left_child, 3, MPI_COMM_WORLD);
+    //     }
+    //     if (right_child < num_procs) {
+    //         int send_count = result.size();
+    //         MPI_Send(&send_count, 1, MPI_INT, right_child, 2, MPI_COMM_WORLD);
+    //         MPI_Send(result.data(), send_count, MPI_INDEX_VALUE_TYPE, right_child, 3, MPI_COMM_WORLD);
+    //     }
+    // } else {
+    //     // non root node will receive
+    //     int recv_count;
+    //     MPI_Recv(&recv_count, 1, MPI_INT, parent, 2, MPI_COMM_WORLD, MPI_STATUS_IGNORE);
 
-        std::vector<IndexValue> recv_buffer(recv_count);
-        MPI_Recv(recv_buffer.data(), recv_count, MPI_INDEX_VALUE_TYPE, parent, 3, MPI_COMM_WORLD, MPI_STATUS_IGNORE);
+    //     std::vector<IndexValue> recv_buffer(recv_count);
+    //     MPI_Recv(recv_buffer.data(), recv_count, MPI_INDEX_VALUE_TYPE, parent, 3, MPI_COMM_WORLD, MPI_STATUS_IGNORE);
 
-        result.assign(recv_buffer.begin(), recv_buffer.end());
+    //     result.assign(recv_buffer.begin(), recv_buffer.end());
 
-        if (left_child < num_procs) {
-            MPI_Send(&recv_count, 1, MPI_INT, left_child, 2, MPI_COMM_WORLD);
-            MPI_Send(result.data(), recv_count, MPI_INDEX_VALUE_TYPE, left_child, 3, MPI_COMM_WORLD);
-        }
-        if (right_child < num_procs) {
-            MPI_Send(&recv_count, 1, MPI_INT, right_child, 2, MPI_COMM_WORLD);
-            MPI_Send(result.data(), recv_count, MPI_INDEX_VALUE_TYPE, right_child, 3, MPI_COMM_WORLD);
-        }
+    //     if (left_child < num_procs) {
+    //         MPI_Send(&recv_count, 1, MPI_INT, left_child, 2, MPI_COMM_WORLD);
+    //         MPI_Send(result.data(), recv_count, MPI_INDEX_VALUE_TYPE, left_child, 3, MPI_COMM_WORLD);
+    //     }
+    //     if (right_child < num_procs) {
+    //         MPI_Send(&recv_count, 1, MPI_INT, right_child, 2, MPI_COMM_WORLD);
+    //         MPI_Send(result.data(), recv_count, MPI_INDEX_VALUE_TYPE, right_child, 3, MPI_COMM_WORLD);
+    //     }
+    // }
+
+    // broadcast
+    int final_size = result.size();
+    MPI_Bcast(&final_size, 1, MPI_INT, 0, MPI_COMM_WORLD);
+
+    if (rank != 0) {
+        result.resize(final_size);
     }
+    MPI_Bcast(result.data(), final_size, MPI_INDEX_VALUE_TYPE, 0, MPI_COMM_WORLD);
+
     return result;
 }
 
