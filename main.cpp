@@ -54,11 +54,15 @@ int main(int argc, char** argv) {
     // TODO: initialize
 
 
+
     int num_procs, rank; // TODO: number of processes is defined when running mpirun or smth
     
     MPI_Init(&argc, &argv); 
     MPI_Comm_size(MPI_COMM_WORLD, &num_procs);
     MPI_Comm_rank(MPI_COMM_WORLD, &rank);
+    if (rank == 0) {
+        std::cout << "Running main\n" << std::endl; 
+    }
 
     int blocklengths[2] = {1, 1};
     MPI_Aint offsets[2];

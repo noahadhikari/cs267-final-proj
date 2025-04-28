@@ -71,7 +71,7 @@ SparseVector delta_decode(const DeltaEncodedVector& dev) {
 
 
 
-constexpr size_t VECTOR_LENGTH = 1000000; // number of bits in mask. need to know at compile-time for bitmask compression so can't do as command line arg
+constexpr size_t VECTOR_LENGTH = 2000000; // number of bits in mask. need to know at compile-time for bitmask compression so can't do as command line arg
 struct BitmaskEncodedVector {
     std::bitset<VECTOR_LENGTH> mask;
     std::vector<ValueType> values;

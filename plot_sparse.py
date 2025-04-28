@@ -4,22 +4,34 @@ import os
 
 df = pd.read_csv("sparse.csv")
 
+baseline_labels = {
+    # 2: 'Naive AlltoAllv',
+    # 3: 'Butterfly',
+    # 4: 'Tree',
+    11: 'Naive AlltoAllv',
+    12: 'Delta Encoding AlltoAllv',
+    13: 'Bitmap Encoding AlltoAllv',
+}
+
+# remove the rows from df that don't have a Baseline value in the baseline_labels
+df = df[df['Baseline'].isin(baseline_labels.keys())]
+
+
 densities = sorted(df['Density'].unique())
 baselines = sorted(df['Baseline'].unique())
 
-baseline_labels = {
-    2: 'Naive AlltoAllv',
-    3: 'Butterfly',
-    4: 'Tree'
-}
+
 
 colors = ['blue', 'orange', 'green', 'red', 'purple']
 markers = ['o', 's', 'd', '^', '*']
 
 baseline_style = {
-    2: (colors[0], markers[0]),
-    3: (colors[1], markers[1]),
-    4: (colors[2], markers[2])
+    # 2: (colors[0], markers[0]),
+    # 3: (colors[1], markers[1]),
+    # 4: (colors[2], markers[2]),
+    11: (colors[0], markers[0]),
+    12: (colors[1], markers[1]),
+    13: (colors[2], markers[2]),
 }
 
 os.makedirs("plots", exist_ok=True)
@@ -43,6 +55,6 @@ for density in densities:
     plt.legend(title="Baseline")
     plt.tight_layout()
 
-    filename = f"plots/graph_density_{density}.png"
+    filename = f"plots/graph_compression_{density}.png"
     plt.savefig(filename, dpi=300)
     plt.close()

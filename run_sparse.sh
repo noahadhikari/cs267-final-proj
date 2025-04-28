@@ -8,7 +8,7 @@ baselines=("11" "12" "13")
 
 tasks_per_node=("2" "4" "8" "16" "32" "64")
 
-length=1000000
+length=2000000
 
 echo "Running sparse execution tests..."
 
