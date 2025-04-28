@@ -94,6 +94,9 @@ int main(int argc, char** argv) {
         } else if (strcmp(argv[i], "-v") == 0 && i + 1 < argc) {
             // indicate which vector distribution to generate, 1 for uniform, 2 for exponential, 3 for poisson
             distribution = std::stoi(argv[++i]);
+            if (distribution == 3) {
+                lambda = length / 2;
+            }
         } else if (strcmp(argv[i], "-p") == 0 && i + 1 < argc) {
             // indicate param for geometric and poisson distribution
             lambda = std::stod(argv[++i]);

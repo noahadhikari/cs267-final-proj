@@ -91,9 +91,9 @@ SparseVector sparse_exponential_vector(long seed, size_t length, double lambda, 
     return sparse_vector(seed, length, dist, density, length * lambda / 2);
 }
 
-SparseVector sparse_poisson_vector(long seed, size_t length, double lambda, double density) {
-    std::poisson_distribution<> dist(lambda);
-    return sparse_vector(seed, length, dist, density, length * 1 / (2 * lambda));
+SparseVector sparse_poisson_vector(long seed, size_t length, double mean, double density) {
+    std::poisson_distribution<> dist(mean);
+    return sparse_vector(seed, length, dist, density, 1);
 }
 
 #endif
