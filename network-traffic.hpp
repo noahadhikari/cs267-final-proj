@@ -396,4 +396,70 @@ SparseVector tree_reduce_sparse(const SparseVector& vec, int rank, int num_procs
 }
 
 
+SparseVector ring_reduce_sparse(const SparseVector& vec, int rank, int num_procs) {
+    SparseVector result = vec;
+    
+    if (num_procs == 1) {
+        return result;
+    }
+    
+    if (rank == 0) {
+        // only send data to the next process
+        int send_count = result.size();
+        MPI_Send(&send_count, 1, MPI_INT, 1, 0, MPI_COMM_WORLD);
+        MPI_Send(result.data(), send_count, MPI_INDEX_VALUE_TYPE, 1, 1, MPI_COMM_WORLD);
+    }
+    else if (rank < num_procs - 1) {
+        // middle processes -- receive, merge, and forward
+        int recv_count;
+        MPI_Recv(&recv_count, 1, MPI_INT, rank - 1, 0, MPI_COMM_WORLD, MPI_STATUS_IGNORE);
+        
+        std::vector<IndexValue> recv_buffer(recv_count);
+        MPI_Recv(recv_buffer.data(), recv_count, MPI_INDEX_VALUE_TYPE, rank - 1, 1, 
+                MPI_COMM_WORLD, MPI_STATUS_IGNORE);
+        
+        // merge received data with local data
+        SparseVector recv_vec(recv_buffer.begin(), recv_buffer.end());
+        result = two_way_merge(result, recv_vec);
+        
+        // send to next process
+        int send_count = result.size();
+        MPI_Send(&send_count, 1, MPI_INT, rank + 1, 0, MPI_COMM_WORLD);
+        MPI_Send(result.data(), send_count, MPI_INDEX_VALUE_TYPE, rank + 1, 1, MPI_COMM_WORLD);
+    }
+    else {
+        // only last process -- receive, merge, and broadcast the result
+        int recv_count;
+        MPI_Recv(&recv_count, 1, MPI_INT, rank - 1, 0, MPI_COMM_WORLD, MPI_STATUS_IGNORE);
+        
+        std::vector<IndexValue> recv_buffer(recv_count);
+        MPI_Recv(recv_buffer.data(), recv_count, MPI_INDEX_VALUE_TYPE, rank - 1, 1, 
+                MPI_COMM_WORLD, MPI_STATUS_IGNORE);
+        
+        // merge received data with local data
+        SparseVector recv_vec(recv_buffer.begin(), recv_buffer.end());
+        result = two_way_merge(result, recv_vec);
+    }
+    
+    // broadcast the final size and result from the last process to all processes
+    int final_size = 0;
+    if (rank == num_procs - 1) {
+        final_size = result.size();
+    }
+    
+    // num_procs -1 broadcasts the size
+    MPI_Bcast(&final_size, 1, MPI_INT, num_procs - 1, MPI_COMM_WORLD);
+    
+    // allocate space for the final result on non-last processes
+    if (rank != num_procs - 1) {
+        result.resize(final_size);
+    }
+    
+    // broadcast the data from the last process
+    MPI_Bcast(result.data(), final_size, MPI_INDEX_VALUE_TYPE, num_procs - 1, MPI_COMM_WORLD);
+    
+    return result;
+}
+
+
 #endif

@@ -175,6 +175,11 @@ int main(int argc, char** argv) {
             // print_sparse_vector(result);
             break;
         }
+        // sparse vector + ring
+        case 5: {
+            SparseVector result = ring_reduce_sparse(vec, rank, num_procs);
+            break;
+        }
         // uncompressed alltoall
         case 11: {
             // std::cout << "Rank" << rank << ": ";
