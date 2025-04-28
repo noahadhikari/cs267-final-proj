@@ -170,31 +170,38 @@ int main(int argc, char** argv) {
         }
         // uncompressed alltoall
         case 11: {
-            std::cout << "Rank" << rank << ": ";
-            print_sparse_vector(vec);
+            // std::cout << "Rank" << rank << ": ";
+            // print_sparse_vector(vec);
             SparseVector result = alltoallv_comm_sparse(vec, rank, num_procs, CompressionType::NONE);
-            std::cout << "Rank" << rank << ": ";
-            print_sparse_vector(result);
+            // std::cout << "Rank" << rank << ": ";
+            // print_sparse_vector(result);
             break;
         }
         // delta alltoall
         case 12: {
-            std::cout << "Rank" << rank << ": ";
-            print_sparse_vector(vec);
+            // std::cout << "Rank" << rank << ": ";
+            // print_sparse_vector(vec);
             SparseVector result = alltoallv_comm_sparse(vec, rank, num_procs, CompressionType::DELTA);
-            std::cout << "Rank" << rank << ": ";
-            print_sparse_vector(result);
+            // std::cout << "Rank" << rank << ": ";
+            // print_sparse_vector(result);
             break;
 
         }
         // bitmask alltoall
         case 13: {
-            std::cout << "Rank" << rank << ": ";
-            print_sparse_vector(vec);
+            // check if length matches the constexpr VECTOR_LENGTH
+            if (length != VECTOR_LENGTH) {
+                std::cerr << "VECTOR_LENGTH does not match -l=" << length << ". VECTOR_LENGTH is currently " << VECTOR_LENGTH << "\n"
+                          << "Change the VECTOR_LENGTH in compression.hpp to match the length of the vector in -l=" << length << "\n";
+                return 1;
+            }
+            start_time = std::chrono::steady_clock::now();
+            // std::cout << "Rank" << rank << ": ";
+            // print_sparse_vector(vec);
             SparseVector result = alltoallv_comm_sparse(vec, rank, num_procs, CompressionType::BITMASK);
 
-            std::cout << "Rank" << rank << ": ";
-            print_sparse_vector(result);
+            // std::cout << "Rank" << rank << ": ";
+            // print_sparse_vector(result);
             break;
         }
         default:
