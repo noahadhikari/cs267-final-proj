@@ -16,7 +16,7 @@ tasks_per_node=("2" "4" "8" "16" "32" "64")
 
 lengths=("1000000")
 
-distributions=("1" "2" "3")
+distributions=("1" "2")
 
 echo "Running sparse execution tests..."
 
