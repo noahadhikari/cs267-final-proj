@@ -56,7 +56,7 @@ void emplace_or_add(SparseVector& v, size_t index, ValueType value) {
 * multiplier is the factor to scale the generated index to have an expected value of length/2 (analogous to uniform distribution)
 */
 template <typename Distribution>
-SparseVector sparse_vector(long seed, size_t length, Distribution& dist, double goal_density) {
+SparseVector sparse_vector(long seed, size_t length, Distribution& dist, double goal_density, double multiplier = 1.0) {
     std::mt19937 rng;
     rng.seed(seed);
     std::uniform_real_distribution<> uniform_dist(0., 1.);
@@ -66,19 +66,19 @@ SparseVector sparse_vector(long seed, size_t length, Distribution& dist, double 
     size_t count = 0;
 
     do {
-        size_t index = dist(rng);
+        size_t index = multiplier * dist(rng);
         if (index < length) {
-            // // check if the index isn't already filled
-            // if (contains_index(result, index)) {
-            //     ValueType value = generate_value(uniform_dist, rng);
-            //     result.emplace_back(index, value);
-            //     ++count;
-            // }
+            // check if the index isn't already filled
+            if (!contains_index(result, index)) {
+                ValueType value = generate_value(uniform_dist, rng);
+                result.emplace_back(index, value);
+                ++count;
+            }
 
             // if the index isn't present, generate a value and place it in the vector. otherwise, add it to the existing value
-            ValueType value = generate_value(uniform_dist, rng);
-            emplace_or_add(result, index, value);
-            count++;
+            // ValueType value = generate_value(uniform_dist, rng);
+            // emplace_or_add(result, index, value);
+            // ++count;
         }
     } while ((static_cast<double>(count) / length) < goal_density);
 
@@ -101,9 +101,9 @@ SparseVector sparse_uniform_vector(long seed, size_t length, double density) {
     return sparse_vector(seed, length, dist, density);
 }
 
-SparseVector sparse_exponential_vector(long seed, size_t length, double p, double density) {
-    std::geometric_distribution<> dist(p);
-    return sparse_vector(seed, length, dist, density);
+SparseVector sparse_exponential_vector(long seed, size_t length, double lambda, double density) {
+    std::exponential_distribution<> dist(lambda);
+    return sparse_vector(seed, length, dist, density, length * lambda / 2);
 }
 
 SparseVector sparse_poisson_vector(long seed, size_t length, double mean, double density) {
