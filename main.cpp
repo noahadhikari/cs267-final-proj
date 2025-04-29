@@ -78,7 +78,7 @@ int main(int argc, char** argv) {
     int baseline = 1; // default: naive
     int distribution = 1; // default: uniform
     double density = 0.1;
-    double param = 0.1;
+    double param = 0.5;
     long seed = 0;
 
     SparseVector vec;
@@ -94,7 +94,7 @@ int main(int argc, char** argv) {
         } else if (strcmp(argv[i], "-v") == 0 && i + 1 < argc) {
             // indicate which vector distribution to generate, 1 for uniform, 2 for exponential, 3 for poisson
             distribution = std::stoi(argv[++i]);
-            if (distribution == 3) {
+            if (distribution == 3) { // if poisson
                 param = length / 2;
             }
         } else if (strcmp(argv[i], "-p") == 0 && i + 1 < argc) {
