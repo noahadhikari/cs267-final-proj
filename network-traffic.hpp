@@ -266,6 +266,7 @@ std::vector<ValueType> all_reduce_sum_dense(const DenseVector& vec, int rank, in
 }
 
 /* 
+* Blocking communication
 * Butterfly topology should only be used for the number of processes that have a power of 2
 */
 SparseVector butterfly_reduce_sparse(const SparseVector& vec, int rank, int num_procs) {
@@ -299,6 +300,40 @@ SparseVector butterfly_reduce_sparse(const SparseVector& vec, int rank, int num_
 }
 
 /* 
+* Non-blocking communication
+# Butterfly topology should only be used for the number of processes that have a power of 2
+*/
+SparseVector butterfly_reduce_sparse_nonblocking(const SparseVector& vec, int rank, int num_procs) {
+    SparseVector result = vec;
+
+    for (int i = 0; (1 << i) < num_procs; ++i) {
+        int partner = rank ^ (1 << i);
+
+        int send_count = result.size();
+        int recv_count = 0;
+
+        MPI_Request reqs[4];
+
+        // exchange sizes
+        MPI_Isend(&send_count, 1, MPI_INT, partner, 0, MPI_COMM_WORLD, &reqs[0]);
+        MPI_Irecv(&recv_count, 1, MPI_INT, partner, 0, MPI_COMM_WORLD, &reqs[1]);
+        MPI_Waitall(2, &reqs[0], MPI_STATUSES_IGNORE);
+
+        std::vector<IndexValue> recv_buffer(recv_count);
+
+        // exchange index-value pairs
+        MPI_Isend(result.data(), send_count, MPI_INDEX_VALUE_TYPE, partner, 1, MPI_COMM_WORLD, &reqs[2]);
+        MPI_Irecv(recv_buffer.data(), recv_count, MPI_INDEX_VALUE_TYPE, partner, 1, MPI_COMM_WORLD, &reqs[3]);
+        MPI_Waitall(2, &reqs[2], MPI_STATUSES_IGNORE);
+
+        SparseVector partner_vec(recv_buffer.begin(), recv_buffer.end());
+        result = two_way_merge(result, partner_vec);
+    }
+    return result;
+}
+
+/*
+* Blocking communication
 * Binary tree topology
 */
 SparseVector tree_reduce_sparse(const SparseVector& vec, int rank, int num_procs) {
@@ -395,7 +430,87 @@ SparseVector tree_reduce_sparse(const SparseVector& vec, int rank, int num_procs
     return result;
 }
 
+/*
+* Non-blocking communication
+* Binary tree topology
+*/
+SparseVector tree_reduce_sparse_nonblocking(const SparseVector& vec, int rank, int num_procs) {
+    SparseVector result = vec;
 
+    int parent = (rank - 1) / 2;
+    int left_child = 2 * rank + 1;
+    int right_child = 2 * rank + 2;
+
+    MPI_Request reqs[4];
+    std::vector<IndexValue> left_buf, right_buf;
+    int req_count = 0;
+    int left_count = 0;
+    int right_count = 0;
+
+    // send counts
+    if (left_child < num_procs) {
+        MPI_Irecv(&left_count, 1, MPI_INT, left_child, 0, MPI_COMM_WORLD, &reqs[req_count++]);
+    }
+
+    if (right_child < num_procs) {
+        MPI_Irecv(&right_count, 1, MPI_INT, right_child, 0, MPI_COMM_WORLD, &reqs[req_count++]);
+    }
+
+    if (req_count > 0) {
+        MPI_Waitall(req_count, reqs, MPI_STATUSES_IGNORE);
+    }
+
+    req_count = 0;
+    // send data
+    if (left_child < num_procs) {
+        left_buf.resize(left_count);
+        MPI_Irecv(left_buf.data(), left_count, MPI_INDEX_VALUE_TYPE, left_child, 1, MPI_COMM_WORLD, &reqs[req_count++]);
+    }
+
+    if (right_child < num_procs) {
+        right_buf.resize(right_count);
+        MPI_Irecv(right_buf.data(), right_count, MPI_INDEX_VALUE_TYPE, right_child, 1, MPI_COMM_WORLD, &reqs[req_count++]);
+    }
+
+    if (req_count > 0) {
+        MPI_Waitall(req_count, reqs, MPI_STATUSES_IGNORE);
+    }
+
+    // merge
+    if (left_child < num_procs) {
+        SparseVector left_vec(left_buf.begin(), left_buf.end());
+        result = two_way_merge(result, left_vec);
+    }
+
+    if (right_child < num_procs) {
+        SparseVector right_vec(right_buf.begin(), right_buf.end());
+        result = two_way_merge(result, right_vec);
+    }
+
+    // send merged result to parent
+    if (rank != 0) {
+        int send_count = result.size();
+        MPI_Send(&send_count, 1, MPI_INT, parent, 0, MPI_COMM_WORLD);
+        MPI_Send(result.data(), send_count, MPI_INDEX_VALUE_TYPE, parent, 1, MPI_COMM_WORLD);
+        result.clear();
+    }
+
+    // broadcast
+    int final_size = result.size();
+    MPI_Bcast(&final_size, 1, MPI_INT, 0, MPI_COMM_WORLD);
+
+    if (rank != 0) {
+        result.resize(final_size);
+    }
+    MPI_Bcast(result.data(), final_size, MPI_INDEX_VALUE_TYPE, 0, MPI_COMM_WORLD);
+
+    return result;
+}
+
+/*
+* Blocking communication
+* Ring topology
+*/
 SparseVector ring_reduce_sparse(const SparseVector& vec, int rank, int num_procs) {
     SparseVector result = vec;
     
@@ -439,6 +554,70 @@ SparseVector ring_reduce_sparse(const SparseVector& vec, int rank, int num_procs
         // merge received data with local data
         SparseVector recv_vec(recv_buffer.begin(), recv_buffer.end());
         result = two_way_merge(result, recv_vec);
+    }
+    
+    // broadcast the final size and result from the last process to all processes
+    int final_size = 0;
+    if (rank == num_procs - 1) {
+        final_size = result.size();
+    }
+    
+    // num_procs -1 broadcasts the size
+    MPI_Bcast(&final_size, 1, MPI_INT, num_procs - 1, MPI_COMM_WORLD);
+    
+    // allocate space for the final result on non-last processes
+    if (rank != num_procs - 1) {
+        result.resize(final_size);
+    }
+    
+    // broadcast the data from the last process
+    MPI_Bcast(result.data(), final_size, MPI_INDEX_VALUE_TYPE, num_procs - 1, MPI_COMM_WORLD);
+    
+    return result;
+}
+
+/*
+* Non-blocking communication
+* Ring topology
+*/
+SparseVector ring_reduce_sparse_nonblocking(const SparseVector& vec, int rank, int num_procs) {
+    SparseVector result = vec;
+    
+    if (num_procs == 1) {
+        return result;
+    }
+
+    MPI_Request reqs[2];
+    int recv_count = 0;
+    std::vector<IndexValue> recv_buffer;
+
+    if (rank == 0) {
+        // only send data to the next process
+        int send_count = result.size();
+        MPI_Isend(&send_count, 1, MPI_INT, 1, 0, MPI_COMM_WORLD, &reqs[0]);
+        MPI_Isend(result.data(), send_count, MPI_INDEX_VALUE_TYPE, 1, 1, MPI_COMM_WORLD, &reqs[1]);
+        MPI_Waitall(2, reqs, MPI_STATUSES_IGNORE);
+    }
+    else {
+        // middle processes -- receive, merge, and forward
+        MPI_Irecv(&recv_count, 1, MPI_INT, rank - 1, 0, MPI_COMM_WORLD, &reqs[0]);
+        MPI_Wait(&reqs[0], MPI_STATUS_IGNORE);
+
+        recv_buffer.resize(recv_count);
+        MPI_Irecv(recv_buffer.data(), recv_count, MPI_INDEX_VALUE_TYPE, rank - 1, 1, 
+                MPI_COMM_WORLD, &reqs[1]);
+        MPI_Wait(&reqs[0], MPI_STATUS_IGNORE);
+
+        // merge received data with local data
+        SparseVector recv_vec(recv_buffer.begin(), recv_buffer.end());
+        result = two_way_merge(result, recv_vec);
+        
+        if (rank < num_procs - 1) {
+            int send_count = result.size();
+            MPI_Isend(&send_count, 1, MPI_INT, rank + 1, 0, MPI_COMM_WORLD, &reqs[0]);
+            MPI_Isend(result.data(), send_count, MPI_INDEX_VALUE_TYPE, rank + 1, 1, MPI_COMM_WORLD, &reqs[1]);
+            MPI_Waitall(2, reqs, MPI_STATUSES_IGNORE);
+        }
     }
     
     // broadcast the final size and result from the last process to all processes

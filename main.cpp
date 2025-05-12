@@ -138,13 +138,13 @@ int main(int argc, char** argv) {
             DenseVector dense_vec = convert_to_dense(vec, length);
             start_time = std::chrono::steady_clock::now();
 
-            std::cout << "Rank" << rank << ": ";
-            print_dense_vector(dense_vec);
+            // std::cout << "Rank" << rank << ": ";
+            // print_dense_vector(dense_vec);
 
             std::vector<ValueType> reduced_vec = all_reduce_sum_dense(dense_vec, rank, num_procs);
 
-            std::cout << "Rank" << rank << ": ";
-            print_dense_vector(reduced_vec);
+            // std::cout << "Rank" << rank << ": ";
+            // print_dense_vector(reduced_vec);
             break;
         }
         // sparse vector baseline
@@ -162,6 +162,7 @@ int main(int argc, char** argv) {
             // std::cout << "Rank" << rank << ": ";
             // print_sparse_vector(vec);
             SparseVector result = butterfly_reduce_sparse(vec, rank, num_procs);
+            // SparseVector result = butterfly_reduce_sparse_blocking(vec, rank, num_procs);
             // std::cout << "Rank" << rank << ": ";
             // print_sparse_vector(result);
             break;
@@ -177,11 +178,39 @@ int main(int argc, char** argv) {
         }
         // sparse vector + ring
         case 5: {
-            std::cout << "Rank" << rank << ": ";
-            print_sparse_vector(vec);
+            // std::cout << "Rank" << rank << ": ";
+            // print_sparse_vector(vec);
             SparseVector result = ring_reduce_sparse(vec, rank, num_procs);
-            std::cout << "Rank" << rank << ": ";
-            print_sparse_vector(result);
+            // std::cout << "Rank" << rank << ": ";
+            // print_sparse_vector(result);
+            break;
+        }
+        // sparse vector + butterfly nonblocking
+        case 6: {
+            // std::cout << "Rank" << rank << ": ";
+            // print_sparse_vector(vec);
+            SparseVector result = butterfly_reduce_sparse_nonblocking(vec, rank, num_procs);
+            // SparseVector result = butterfly_reduce_sparse_blocking(vec, rank, num_procs);
+            // std::cout << "Rank" << rank << ": ";
+            // print_sparse_vector(result);
+            break;
+        }
+        // sparse vector + tree nonblocking
+        case 7: {
+            // std::cout << "Rank" << rank << ": ";
+            // print_sparse_vector(vec);
+            SparseVector result = tree_reduce_sparse_nonblocking(vec, rank, num_procs);
+            // std::cout << "Rank" << rank << ": ";
+            // print_sparse_vector(result);
+            break;
+        }
+        // sparse vector + ring nonblocking
+        case 8: {
+            // std::cout << "Rank" << rank << ": ";
+            // print_sparse_vector(vec);
+            SparseVector result = ring_reduce_sparse_nonblocking(vec, rank, num_procs);
+            // std::cout << "Rank" << rank << ": ";
+            // print_sparse_vector(result);
             break;
         }
         // uncompressed alltoall
