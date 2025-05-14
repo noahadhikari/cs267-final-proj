@@ -7,16 +7,16 @@ if [ ! -s sparse.csv ]; then
     echo "Length,Density,Baseline,TasksPerNode,Distribution,Time" > sparse.csv
 fi
 
-# densities=("0.01" "0.03" "0.05" "0.1" "0.2")
-densities=("0.01")
+densities=("0.01" "0.03" "0.05" "0.1" "0.2")
+# densities=("0.01")
 
-baselines=("11" "12")
+baselines=("6" "7" "8")
 
 tasks_per_node=("2" "4" "8" "16" "32" "64")
 
 lengths=("1000000")
 
-distributions=("2")
+distributions=("1")
 
 echo "Running sparse execution tests..."
 
